@@ -2,11 +2,6 @@ from __future__ import annotations
 import os, json, random, uuid, pathlib, html, mimetypes
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-
-# טעינת משתני סביבה מתוך .env (חשוב!)
-from dotenv import load_dotenv
-load_dotenv()
-
 import streamlit as st
 
 # ========================= קבועים והגדרות =========================
@@ -17,11 +12,20 @@ LOCAL_QUESTIONS_JSON = DATA_DIR / "questions.json"
 ADMIN_CODE = os.getenv("ADMIN_CODE", "admin246")
 FIXED_N_QUESTIONS = 15
 
-# Supabase (חינמי) - הגדרות דרך Secrets/.env
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "")           # לדוגמה: "quiz-media"
-QUESTIONS_OBJECT_PATH = os.getenv("QUESTIONS_OBJECT_PATH", "data/questions.json")
+# --- עוזר לטעינת סודות מסטרימליט (secrets) או מה־ENV ---
+def _env(name: str, default: str = "") -> str:
+    try:
+        if hasattr(st, "secrets") and name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return os.getenv(name, default)
+
+# Supabase (חינמי) - הגדרות דרך Secrets/ENV
+SUPABASE_URL = _env("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = _env("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_BUCKET = _env("SUPABASE_BUCKET", "")                 # לדוגמה: "quiz-media"
+QUESTIONS_OBJECT_PATH = _env("QUESTIONS_OBJECT_PATH", "data/questions.json")
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
@@ -47,7 +51,7 @@ def upload_to_supabase(file_bytes: bytes, filename: str) -> str:
     sb.storage.from_(SUPABASE_BUCKET).upload(
         object_path,
         file=file_bytes,
-        file_options={"content-type": content_type, "upsert": "true"},
+        file_options={"content-type": content_type, "upsert": True},
     )
     return f"sb://{SUPABASE_BUCKET}/{object_path}"
 
@@ -83,14 +87,16 @@ def _sb_download_bytes(object_path: str) -> bytes:
 
 def _sb_upload_bytes(object_path: str, data: bytes, content_type: str = "application/json"):
     sb = _get_supabase(); assert sb is not None
+    # מחיקת ישן אם קיים (לא חובה; לא יפיל אם לא קיים)
     try:
         sb.storage.from_(SUPABASE_BUCKET).remove([object_path])
     except Exception:
         pass
+    # העלאה נכונה עם file= ו-upsert=True (bool)
     sb.storage.from_(SUPABASE_BUCKET).upload(
         object_path,
-        data,
-        file_options={"content-type": content_type, "upsert": "true"},
+        file=data,
+        file_options={"content-type": content_type, "upsert": True},
     )
 
 def _read_questions() -> List[Dict[str, Any]]:
@@ -99,8 +105,15 @@ def _read_questions() -> List[Dict[str, Any]]:
             raw = _sb_download_bytes(QUESTIONS_OBJECT_PATH)
             data = json.loads(raw.decode("utf-8"))
         except Exception:
+            # אם עדיין אין קובץ בענן – נתחיל מריק וננסה לדחוף אותו
             data = []
-            _write_questions(data)
+            try:
+                _sb_upload_bytes(QUESTIONS_OBJECT_PATH, json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            except Exception:
+                # fallback ללוקאלי בלי להתרסק
+                if not LOCAL_QUESTIONS_JSON.exists():
+                    LOCAL_QUESTIONS_JSON.write_text("[]", encoding="utf-8")
+                data = json.loads(LOCAL_QUESTIONS_JSON.read_text(encoding="utf-8"))
     else:
         if not LOCAL_QUESTIONS_JSON.exists():
             LOCAL_QUESTIONS_JSON.write_text("[]", encoding="utf-8")
@@ -289,7 +302,7 @@ with col_top_right:
         st.session_state["admin_screen"] = "login"
         st.rerun()
 
-# אם לא במצב אדמין - ניקוי יתרות מצב אדמין
+# אם לא במצב אדמין - ודא שאפסנו כל state של אדמין כדי לא לזלוג למסכים
 if not st.session_state.get("admin_mode"):
     for k in ["admin_screen","admin_edit_mode","admin_edit_qid"]:
         st.session_state.pop(k, None)
@@ -355,6 +368,7 @@ if not st.session_state.get("admin_mode"):
                 st.rerun()
             if c2.button("אפס משחק"):
                 reset_game_state(); st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
     elif st.session_state.phase == "review":
         st.subheader("סקירה לפני הגשה")
@@ -400,6 +414,7 @@ if not st.session_state.get("admin_mode"):
         if c2.button("בדוק אותי"):
             st.session_state.score = _calc_score(st.session_state.questions, st.session_state.answers_map)
             st.session_state.phase = "result"; st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     elif st.session_state.phase == "result":
         total = len(st.session_state.questions); score = st.session_state.score
@@ -528,7 +543,6 @@ def admin_edit_detail_ui():
             with c:
                 st.text_input(f"תשובה {i+1}", value=q["answers"][i]["text"], key=f"edit_ans_{i}")
 
-        # index הוא 0-3 ביחס לרשימת options=[1,2,3,4]
         correct_idx0 = next((i for i in range(4) if q["answers"][i].get("is_correct")), 0)
         st.radio("סמן נכונה", options=[1,2,3,4], index=correct_idx0, key="edit_correct_idx", horizontal=True)
 
