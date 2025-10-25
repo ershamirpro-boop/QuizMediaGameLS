@@ -593,14 +593,14 @@ def admin_add_form_ui():
     for i,c in enumerate(cols):
         with c:
             a_vals.append(st.text_input(f"תשובה {i+1}", key=f"add_ans_{i}"))
-    correct_idx = st.radio("סמן נכונה", options=[0,1,2,3], index=0, horizontal=True, key="add_correct_idx")
+    correct_idx = st.radio("סמן נכונה", options=[1,2,3,4], index=0, horizontal=True, key="add_correct_idx")
     category = st.text_input("קטגוריה (אופציונלי)", value="", key="add_cat")
     difficulty = st.number_input("קושי 1-5", min_value=1, max_value=5, value=2, key="add_diff")
 
     st.divider()
     st.markdown("**תצוגת תצוגה מקדימה**")
     preview = {"type": t, "content_url": media_url, "question": q_text,
-               "answers": [{"text": a_vals[i], "is_correct": i==correct_idx} for i in range(4)]}
+               "answers": [{"text": a_vals[i], "is_correct": (i+1)==correct_idx} for i in range(4)]}
     _render_media(preview, key="add_preview")
     st.markdown(f"### {q_text if q_text else '...'}")
     st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
@@ -629,7 +629,7 @@ def admin_add_form_ui():
                 "type": t,
                 "content_url": media_url if t!="text" else "",
                 "question": q_text,
-                "answers": [{"text": a_vals[i], "is_correct": i==correct_idx} for i in range(4)],
+                "answers": [{"text": a_vals[i], "is_correct": (i+1)==correct_idx} for i in range(4)],
                 "category": category,
                 "difficulty": difficulty,
                 "created_at": datetime.utcnow().isoformat()
