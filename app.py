@@ -229,7 +229,7 @@ def _video_or_audio_with_autoplay(url: str, tag: str, key: str):
     controls = "controlslist='nodownload noplaybackrate'"
     st.markdown(f"""
 <div class="{tag}-shell">
-  <{tag} id="{element_id}" {controls} playsinline preload="auto"></{tag}>
+  <<TAG> id="{element_id}" {controls} playsinline preload="auto"></<TAG>>
   <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
     <button id="{element_id}_play" style="padding:8px 12px;border-radius:10px;border:1px solid #ccc;cursor:pointer;">▶︎ נגן</button>
     <small id="{element_id}_status">מנגן אוטומטית 3 פעמים...</small>
@@ -257,7 +257,7 @@ def _video_or_audio_with_autoplay(url: str, tag: str, key: str):
   btn.addEventListener("click",()=>{{ tryPlay(); }});
 }})();
 </script>
-""", unsafe_allow_html=True)
+""".replace("<TAG>", tag), unsafe_allow_html=True)
 
 def _render_media(q: Dict[str, Any], key: str):
     t = q.get("type","text")
@@ -537,7 +537,7 @@ def admin_edit_detail_ui():
         # תצוגה מקדימה חתומה
         preview_url = _signed_or_raw(st.session_state.get("edit_q_media_url", q.get("content_url","")), 300)
         if st.session_state.get("edit_q_type", t) == "image" and preview_url:
-            st.image(preview_url, use_column_width=True)
+            st.image(preview_url, use_column_width=True)  # תיקון 1
         elif st.session_state.get("edit_q_type", t) == "video" and preview_url:
             st.video(preview_url)
         elif st.session_state.get("edit_q_type", t) == "audio" and preview_url:
@@ -582,7 +582,7 @@ def admin_add_form_ui():
             media_url = _save_uploaded_to_storage(up)
             st.success(f"קובץ נשמר: {media_url}")
             signed = _signed_or_raw(media_url, 300)
-            if t=="image": st.image(signed, use_column_width=True)
+            if t=="image": st.image(signed, use_column_width=True)  # תיקון 2
             elif t=="video": st.video(signed)
             elif t=="audio": st.audio(signed)
         media_url = st.text_input("או הדבק URL (לא חובה)", value=media_url, key="add_media_url")
