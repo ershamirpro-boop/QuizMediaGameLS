@@ -537,7 +537,7 @@ def admin_edit_detail_ui():
         # תצוגה מקדימה חתומה
         preview_url = _signed_or_raw(st.session_state.get("edit_q_media_url", q.get("content_url","")), 300)
         if st.session_state.get("edit_q_type", t) == "image" and preview_url:
-            st.image(preview_url, use_container_width=True)
+            st.image(preview_url, use_column_width=True)
         elif st.session_state.get("edit_q_type", t) == "video" and preview_url:
             st.video(preview_url)
         elif st.session_state.get("edit_q_type", t) == "audio" and preview_url:
