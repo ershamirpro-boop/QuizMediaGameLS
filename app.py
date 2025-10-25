@@ -2,6 +2,11 @@ from __future__ import annotations
 import os, json, random, uuid, pathlib, html, mimetypes
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+
+# טעינת משתני סביבה מתוך .env (חשוב!)
+from dotenv import load_dotenv
+load_dotenv()
+
 import streamlit as st
 
 # ========================= קבועים והגדרות =========================
@@ -12,7 +17,7 @@ LOCAL_QUESTIONS_JSON = DATA_DIR / "questions.json"
 ADMIN_CODE = os.getenv("ADMIN_CODE", "admin246")
 FIXED_N_QUESTIONS = 15
 
-# Supabase (חינמי) - הגדרות דרך Secrets
+# Supabase (חינמי) - הגדרות דרך Secrets/.env
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "")           # לדוגמה: "quiz-media"
@@ -284,7 +289,7 @@ with col_top_right:
         st.session_state["admin_screen"] = "login"
         st.rerun()
 
-# אם לא במצב אדמין - ודא שאפסנו כל state של אדמין כדי לא לזלוג למסכים
+# אם לא במצב אדמין - ניקוי יתרות מצב אדמין
 if not st.session_state.get("admin_mode"):
     for k in ["admin_screen","admin_edit_mode","admin_edit_qid"]:
         st.session_state.pop(k, None)
@@ -350,7 +355,6 @@ if not st.session_state.get("admin_mode"):
                 st.rerun()
             if c2.button("אפס משחק"):
                 reset_game_state(); st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
     elif st.session_state.phase == "review":
         st.subheader("סקירה לפני הגשה")
@@ -396,7 +400,6 @@ if not st.session_state.get("admin_mode"):
         if c2.button("בדוק אותי"):
             st.session_state.score = _calc_score(st.session_state.questions, st.session_state.answers_map)
             st.session_state.phase = "result"; st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
     elif st.session_state.phase == "result":
         total = len(st.session_state.questions); score = st.session_state.score
@@ -525,6 +528,7 @@ def admin_edit_detail_ui():
             with c:
                 st.text_input(f"תשובה {i+1}", value=q["answers"][i]["text"], key=f"edit_ans_{i}")
 
+        # index הוא 0-3 ביחס לרשימת options=[1,2,3,4]
         correct_idx0 = next((i for i in range(4) if q["answers"][i].get("is_correct")), 0)
         st.radio("סמן נכונה", options=[1,2,3,4], index=correct_idx0, key="edit_correct_idx", horizontal=True)
 
