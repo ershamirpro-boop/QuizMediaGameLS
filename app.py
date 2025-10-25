@@ -582,7 +582,7 @@ def admin_add_form_ui():
             media_url = _save_uploaded_to_storage(up)
             st.success(f"קובץ נשמר: {media_url}")
             signed = _signed_or_raw(media_url, 300)
-            if t=="image": st.image(signed, use_container_width=True)
+            if t=="image": st.image(signed, use_column_width=True)
             elif t=="video": st.video(signed)
             elif t=="audio": st.audio(signed)
         media_url = st.text_input("או הדבק URL (לא חובה)", value=media_url, key="add_media_url")
