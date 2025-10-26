@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, json, random, uuid, pathlib, mimetypes, html
+import os, json, random, uuid, pathlib, html, mimetypes, io, tempfile
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import streamlit as st
@@ -11,7 +11,7 @@ DATA_DIR = pathlib.Path("data")
 MEDIA_DIR = pathlib.Path("media")
 LOCAL_QUESTIONS_JSON = DATA_DIR / "questions.json"
 
-ADMIN_CODE = os.getenv("ADMIN_CODE", "admin246")  # ניתן לשנות ב-Secrets
+ADMIN_CODE = os.getenv("ADMIN_CODE", "admin246")  # אפשר להגדיר בסיקרטס
 FIXED_N_QUESTIONS = 15
 
 # Supabase (חינמי) - דרך Secrets
@@ -35,22 +35,26 @@ def _get_supabase():
         _supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     return _supabase
 
+def _sb_upload_bytes(object_path: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+    """
+    העלאה ל-Storage ב-supabase-py v2: סדר ארגומנטים -> (path, file, file_options)
+    file_options חייבים מפתחות contentType / upsert כמחרוזות כדי למנוע TypeError של headers.
+    """
+    sb = _get_supabase(); assert sb is not None
+    file_options = {"contentType": content_type, "upsert": "true"}
+    # הספרייה תומכת ב-bytes ישירות
+    res = sb.storage.from_(SUPABASE_BUCKET).upload(object_path, data, file_options=file_options)
+    # מחזיר נתיב בסכימת sb://
+    return f"sb://{SUPABASE_BUCKET}/{object_path}"
+
 def upload_to_supabase(file_bytes: bytes, filename: str) -> str:
-    """מעלה לבאקט ומחזיר sb://bucket/path"""
-    sb = _get_supabase(); assert sb is not None, "Supabase לא מוגדר"
     ext = pathlib.Path(filename).suffix.lower()
     content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     folder = datetime.utcnow().strftime("media/%Y/%m")
     object_path = f"{folder}/{uuid.uuid4().hex}{ext}"
-    sb.storage.from_(SUPABASE_BUCKET).upload(
-        object_path,
-        file_bytes,
-        file_options={"content-type": content_type, "upsert": "true"},
-    )
-    return f"sb://{SUPABASE_BUCKET}/{object_path}"
+    return _sb_upload_bytes(object_path, file_bytes, content_type)
 
 def sign_url_sb(sb_url: str, expires_seconds: int = 300) -> str:
-    """sb://bucket/path -> signed url"""
     assert sb_url.startswith("sb://")
     _, bucket, path = sb_url.split("/", 2)
     sb = _get_supabase(); assert sb is not None
@@ -80,17 +84,12 @@ def _sb_download_bytes(object_path: str) -> bytes:
     sb = _get_supabase(); assert sb is not None
     return sb.storage.from_(SUPABASE_BUCKET).download(object_path)
 
-def _sb_upload_bytes(object_path: str, data: bytes, content_type: str = "application/json"):
-    sb = _get_supabase(); assert sb is not None
-    try:
-        sb.storage.from_(SUPABASE_BUCKET).remove([object_path])
-    except Exception:
-        pass
-    sb.storage.from_(SUPABASE_BUCKET).upload(
-        object_path,
-        data,
-        file_options={"content-type": content_type, "upsert": "true"},
-    )
+def _write_questions(all_q: List[Dict[str, Any]]) -> None:
+    payload = json.dumps(all_q, ensure_ascii=False, indent=2).encode("utf-8")
+    if _supabase_on():
+        _sb_upload_bytes(QUESTIONS_OBJECT_PATH, payload, "application/json; charset=utf-8")
+    else:
+        LOCAL_QUESTIONS_JSON.write_bytes(payload)
 
 def _read_questions() -> List[Dict[str, Any]]:
     if _supabase_on():
@@ -111,14 +110,7 @@ def _read_questions() -> List[Dict[str, Any]]:
             clean.append(q)
     return clean
 
-def _write_questions(all_q: List[Dict[str, Any]]) -> None:
-    payload = json.dumps(all_q, ensure_ascii=False, indent=2).encode("utf-8")
-    if _supabase_on():
-        _sb_upload_bytes(QUESTIONS_OBJECT_PATH, payload, "application/json; charset=utf-8")
-    else:
-        LOCAL_QUESTIONS_JSON.write_bytes(payload)
-
-# ========================= עיצוב כללי + RTL + מובייל =========================
+# ========================= עיצוב כללי + מובייל =========================
 st.set_page_config(page_title=APP_TITLE, page_icon="🎯", layout="wide")
 st.markdown("""
 <style>
@@ -128,47 +120,74 @@ h1,h2,h3,h4{text-align:right;letter-spacing:.2px}
 label,p,li,.stMarkdown{text-align:right}
 
 /* כפתור התחל */
-.start-btn>button{width:100%;padding:14px 16px;font-size:18px;border-radius:12px;background:#23C483!important;color:#fff!important;border:0!important}
-
-/* גריד תשובות */
-.answer-grid .stButton > button{
-  width:100%;
-  padding:14px 16px;
-  font-size:18px;
-  border-radius:12px;
-  min-height:56px;
-  border:1px solid rgba(0,0,0,.15);
+.start-btn>button{
+  width:100%;padding:14px 16px;font-size:18px;border-radius:12px;
+  background:#23C483!important;color:#fff!important;border:0!important
 }
-.choice { margin-bottom:10px; }
-.choice.selected .stButton > button{
+
+/* ===== תשובות (2x2) עם הדגשת בחירה ===== */
+.answer-grid .stButton>button{
+  width:100%;padding:14px 16px;font-size:18px;border-radius:12px;
+  min-height:56px;border:1px solid rgba(0,0,0,.15);
+  transition:all .15s ease-in-out;
+}
+.choice{margin-bottom:10px}
+.choice.selected .stButton>button,
+.choice.selected button{
   background:#ff4b4b !important;
   color:#ffffff !important;
   border-color:#ff4b4b !important;
   box-shadow:0 0 0 2px rgba(255,75,75,.25) inset !important;
+  font-weight:700;
 }
 
-/* פס תחתון */
-.bottom-bar{position:sticky;bottom:0;background:rgba(255,255,255,.94);backdrop-filter:blur(6px);padding:10px 8px;border-top:1px solid rgba(0,0,0,.08)}
-@media (prefers-color-scheme: dark){.bottom-bar{background:rgba(17,24,39,.9);border-top:1px solid rgba(255,255,255,.08)}}
+img{max-height:52vh;object-fit:contain}
+.video-shell,.audio-shell{width:100%}
+.video-shell video,.audio-shell audio{width:100%}
 
+/* פס ניווט תחתון */
+.bottom-bar{
+  position:sticky;bottom:0;background:rgba(255,255,255,.94);
+  backdrop-filter:blur(6px);padding:10px 8px;border-top:1px solid rgba(0,0,0,.08)
+}
+@media (prefers-color-scheme: dark){
+  .bottom-bar{background:rgba(17,24,39,.9);border-top:1px solid rgba(255,255,255,.08)}
+}
+
+/* כפתורים בסקירה/סיכום */
 .summary-btns .stButton button{width:100%;padding:12px 16px;font-size:16px;border-radius:10px}
-
 .badge-ok{background:#E8FFF3;border:1px solid #23C483;color:#0b7a56;padding:6px 10px;border-radius:10px;font-size:14px}
 .badge-err{background:#FFF0F0;border:1px solid #F44336;color:#a02121;padding:6px 10px;border-radius:10px;font-size:14px}
+
+/* CTA גדול ל"בדוק אותי" */
+.primary-cta .stButton>button{
+  width:100%;padding:16px 18px;font-size:20px;border-radius:12px;
+  background:#ff006b !important;color:#fff !important;border:0 !important
+}
 </style>
 """, unsafe_allow_html=True)
 
 # ========================= Utilities =========================
 def reset_admin_state():
-    for k in ["admin_mode","admin_screen","admin_edit_mode","admin_edit_qid","is_admin"]:
+    for k in ["admin_mode","admin_screen","admin_edit_mode","admin_edit_qid"]:
         st.session_state.pop(k, None)
 
-def _pick_session_questions(all_q: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    if not all_q: return []
-    k = min(FIXED_N_QUESTIONS, len(all_q))
-    chosen = random.sample(all_q, k=k)
-    for q in chosen: random.shuffle(q["answers"])
-    return chosen
+def reset_game_state():
+    for k in ["phase","questions","answers_map","current_idx","score","finished","review_idx"]:
+        st.session_state.pop(k, None)
+
+def ensure_game_loaded():
+    if "questions" not in st.session_state:
+        qs = _read_questions()
+        k = min(FIXED_N_QUESTIONS, len(qs))
+        chosen = random.sample(qs, k=k) if k>0 else []
+        for q in chosen:
+            random.shuffle(q["answers"])
+        st.session_state.questions = chosen
+        st.session_state.current_idx = 0
+        st.session_state.answers_map = {}
+        st.session_state.score = 0
+        st.session_state.finished = False
 
 def _calc_score(questions: List[Dict[str, Any]], answers_map: Dict[int, str]) -> int:
     score = 0
@@ -180,7 +199,7 @@ def _calc_score(questions: List[Dict[str, Any]], answers_map: Dict[int, str]) ->
     return score
 
 # ========================= מדיה לתצוגה =========================
-def _render_media(q: Dict[str, Any]):
+def _render_media(q: Dict[str, Any], key: str):
     t = q.get("type","text")
     url = q.get("content_url","")
     if not url: return
@@ -189,47 +208,37 @@ def _render_media(q: Dict[str, Any]):
     elif t=="video": st.video(signed)
     elif t=="audio": st.audio(signed)
 
-# ========================= Buttons helpers =========================
+# ========================= תשובה עם סימון =========================
 def answer_btn(label: str, grid_key: int, btn_idx: int) -> bool:
-    """כפתור תשובה עם הדגשה אדומה אם נבחרה"""
-    picked = st.session_state.answers_map.get(grid_key)
+    """
+    כפתור תשובה עם סימון ברור: הרקע הופך לאדום אם זו הבחירה הנוכחית.
+    נשען על st.session_state.answers_map[grid_key].
+    """
+    picked = st.session_state.answers_map.get(grid_key, None)
     selected = (picked == label)
     st.markdown(f'<div class="choice {"selected" if selected else ""}">', unsafe_allow_html=True)
     clicked = st.button(label, key=f"ans_{grid_key}_{btn_idx}", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
     return clicked
 
-def reset_game_state():
-    for k in ["phase","questions","answers_map","current_idx","score","finished","review_idx"]:
-        st.session_state.pop(k, None)
-
-def ensure_game_loaded():
-    if "questions" not in st.session_state:
-        qs = _read_questions()
-        st.session_state.questions = _pick_session_questions(qs)
-        st.session_state.current_idx = 0
-        st.session_state.answers_map = {}
-        st.session_state.score = 0
-        st.session_state.finished = False
-
 # ========================= Header =========================
 st.title("🎯 משחק טריוויה מדיה")
 st.caption("משחק פתוח ואנונימי. מדיה נטענת באופן פרטי ומאובטח. אין שמירת זהות.")
 
-# כפתור כניסת מנהלים – **רק במסך הבית** (welcome)
-show_admin_button = ("phase" not in st.session_state) or (st.session_state.get("phase") == "welcome")
-if show_admin_button:
+# "כניסת מנהלים" יופיע **רק** במסך פתיחה
+show_admin_entry = (st.session_state.get("phase","welcome") == "welcome")
+if show_admin_entry:
     col_top_left, col_top_right = st.columns([3,1])
     with col_top_right:
         if st.button("כניסת מנהלים", key="admin_entry"):
             st.session_state["admin_mode"] = True
             st.session_state["admin_screen"] = "login"
             st.rerun()
-else:
-    # אם לא במסך הבית – ודא שמצב אדמין כבוי
-    if not st.session_state.get("admin_mode"):
-        for k in ["admin_screen","admin_edit_mode","admin_edit_qid"]:
-            st.session_state.pop(k, None)
+
+# אם לא במצב אדמין - אפס state של אדמין כדי לא לזלוג למסכים
+if not st.session_state.get("admin_mode"):
+    for k in ["admin_screen","admin_edit_mode","admin_edit_qid"]:
+        st.session_state.pop(k, None)
 
 # ========================= UI משתמש רגיל =========================
 if not st.session_state.get("admin_mode"):
@@ -238,7 +247,7 @@ if not st.session_state.get("admin_mode"):
 
     if st.session_state.phase == "welcome":
         st.subheader("ברוך הבא!")
-        st.write("בחר תשובה לכל שאלה. ניתן לצרף מדיה לשאלות מצד המנהל.")
+        st.write("תיאור קצר של המשחק... אפשר לעדכן בהמשך.")
         st.markdown('<div class="start-btn">', unsafe_allow_html=True)
         if st.button("התחל לשחק"):
             if not all_q: st.warning("אין שאלות במאגר כרגע.")
@@ -256,50 +265,42 @@ if not st.session_state.get("admin_mode"):
             idx = st.session_state.current_idx
             q = qlist[idx]
 
-            _render_media(q)
+            _render_media(q, key=f"q{idx}")
             st.markdown(f"### {q['question']}")
             if q.get("category"):
                 st.caption(f"קטגוריה: {q.get('category')} | קושי: {q.get('difficulty','לא צוין')}")
 
-            answers = q["answers"]
             st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
             col1, col2 = st.columns(2, vertical_alignment="center")
+            # תשובות 0,2 בעמודה שמאל; 1,3 בעמודה ימין (עדיין RTL)
             with col1:
-                for i in (0,2):
-                    if i < len(answers):
-                        if answer_btn(answers[i]["text"], grid_key=idx, btn_idx=i):
-                            st.session_state.answers_map[idx] = answers[i]["text"]
-                            st.rerun()
+                for j, i in enumerate([0,2]):
+                    if answer_btn(q["answers"][i]["text"], idx, i):
+                        st.session_state.answers_map[idx] = q["answers"][i]["text"]; st.rerun()
             with col2:
-                for i in (1,3):
-                    if i < len(answers):
-                        if answer_btn(answers[i]["text"], grid_key=idx, btn_idx=i):
-                            st.session_state.answers_map[idx] = answers[i]["text"]
-                            st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+                for j, i in enumerate([1,3]):
+                    if answer_btn(q["answers"][i]["text"], idx, i):
+                        st.session_state.answers_map[idx] = q["answers"][i]["text"]; st.rerun()
 
-            # ניווט תחתון
             st.markdown('<div class="bottom-bar">', unsafe_allow_html=True)
-            c_prev, c_next = st.columns(2)
-            with c_prev:
-                if st.button("הקודם ←", disabled=(idx==0)):
+            nav_l, nav_r = st.columns(2)
+            with nav_l:
+                if st.button("הקודם ↩︎", disabled=(idx==0)):
                     st.session_state.current_idx -= 1; st.rerun()
-            with c_next:
-                # שמור והבא (או מעבר לסקירה אם זו האחרונה)
-                if st.button("שמור והבא →", disabled=(idx not in st.session_state.answers_map)):
-                    if idx + 1 >= len(qlist):
-                        st.session_state.phase = "review"
-                    else:
-                        st.session_state.current_idx += 1
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+            with nav_r:
+                if st.button("↪︎ הבא", disabled=(idx==len(qlist)-1)):
+                    st.session_state.current_idx += 1; st.rerun()
 
-            # פעולות נוספות
             c1, c2 = st.columns(2)
-            if c1.button("אפס משחק"):
+            if c1.button("שמור והמשך לשאלה הבאה", disabled=(idx not in st.session_state.answers_map)):
+                if idx + 1 >= len(qlist):
+                    st.session_state.phase = "review"
+                else:
+                    st.session_state.current_idx += 1
+                st.rerun()
+            if c2.button("אפס משחק"):
                 reset_game_state(); st.rerun()
-            if c2.button("חזור למסך הבית"):
-                reset_game_state(); st.session_state.phase="welcome"; st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
     elif st.session_state.phase == "review":
         st.subheader("סקירה לפני הגשה")
@@ -309,77 +310,72 @@ if not st.session_state.get("admin_mode"):
         q = qlist[ridx]
 
         st.write(f"שאלה {ridx+1} מתוך {len(qlist)}")
-        _render_media(q)
+        _render_media(q, key=f"rev{ridx}")
         st.markdown(f"**{q['question']}**")
         current_pick = st.session_state.answers_map.get(ridx)
 
-        answers = q["answers"]
+        # תצוגת תשובות 2x2 עם סימון אדום
         st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
         col1, col2 = st.columns(2, vertical_alignment="center")
         with col1:
-            for i in (0,2):
-                if i < len(answers):
-                    if answer_btn(answers[i]["text"], grid_key=ridx, btn_idx=i):
-                        st.session_state.answers_map[ridx] = answers[i]["text"]; st.rerun()
+            for i in [0,2]:
+                if answer_btn(q["answers"][i]["text"], ridx, i):
+                    st.session_state.answers_map[ridx] = q["answers"][i]["text"]; st.rerun()
         with col2:
-            for i in (1,3):
-                if i < len(answers):
-                    if answer_btn(answers[i]["text"], grid_key=ridx, btn_idx=i):
-                        st.session_state.answers_map[ridx] = answers[i]["text"]; st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+            for i in [1,3]:
+                if answer_btn(q["answers"][i]["text"], ridx, i):
+                    st.session_state.answers_map[ridx] = q["answers"][i]["text"]; st.rerun()
 
+        # ניווט בין שאלות סקירה
         cols = st.columns(2)
         with cols[0]:
-            if st.button("← הקודם", disabled=(ridx==0)):
+            if st.button("← הקודמת", disabled=(ridx==0)):
                 st.session_state.review_idx -= 1; st.rerun()
         with cols[1]:
-            if st.button("הבא →", disabled=(ridx==len(qlist)-1)):
+            if st.button("הבאה →", disabled=(ridx==len(qlist)-1)):
                 st.session_state.review_idx += 1; st.rerun()
 
+        # CTA גדול לבדיקה
         st.divider()
-        c1, c2 = st.columns(2)
-        if c1.button("בדוק אותי"):
+        st.markdown('<div class="primary-cta">', unsafe_allow_html=True)
+        submit_clicked = st.button("בדוק אותי 💥", key="check_exam_big")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if submit_clicked:
             st.session_state.score = _calc_score(st.session_state.questions, st.session_state.answers_map)
             st.session_state.phase = "result"; st.rerun()
-        if c2.button("חזור"):
-            st.session_state.phase = "quiz"; st.rerun()
 
     elif st.session_state.phase == "result":
-        total = len(st.session_state.questions); score = st.session_state.score
+        qlist = st.session_state.questions
+        total = len(qlist); score = _calc_score(qlist, st.session_state.answers_map)
         pct = int(round(100 * score / max(1,total)))
         st.subheader("תוצאה")
         st.markdown(f"<h1 style='font-size:48px;text-align:center;'>{pct}</h1>", unsafe_allow_html=True)
         if pct == 100:
-            st.success("כל הכבוד! 100%")
-            st.balloons()
-            js_confetti = """
-            <script>
-            try{window.parent.postMessage({isStreamlitMessage:true,type:"streamlit:render",height:0},"*");}catch(e){}
-            </script>"""
-            st.markdown(js_confetti, unsafe_allow_html=True)
+            st.success("כל הכבוד!"); st.balloons(); st.snow()
         elif pct >= 61:
             st.info("😊 יפה מאוד")
         else:
             st.warning("🫣 קורה לכולם, אולי ננסה שוב?")
 
         st.divider()
+        # פירוט המבחן (מה סומן ומה נכון)
         st.markdown("### פירוט המבחן (מה סימנת ומה נכון)")
-        for i, q in enumerate(st.session_state.questions):
-            st.markdown(f"**{i+1}. {q['question']}**")
-            if q.get("type") and q.get("content_url"):
-                _render_media(q)
+        for i, q in enumerate(qlist):
             picked = st.session_state.answers_map.get(i, "—")
-            correct = next(a['text'] for a in q['answers'] if a.get('is_correct'))
+            correct = next(a["text"] for a in q["answers"] if a.get("is_correct"))
             ok = (picked == correct)
-            st.info(f"מה סימנת: **{picked}**")
-            if ok: st.markdown("<div class='badge-ok'>תשובה נכונה ✅</div>", unsafe_allow_html=True)
-            else:  st.markdown(f"<div class='badge-err'>תשובה שגויה ❌ — הנכון: <b>{html.escape(correct)}</b></div>", unsafe_allow_html=True)
-            st.write("---")
+            st.markdown(f"**{i+1}. {q['question']}**")
+            _render_media(q, key=f"res{i}")
+            st.info(("✅ תשובה נכונה" if ok else "❌ תשובה שגויה"))
+            st.markdown(f"- מה סימנת: **{html.escape(picked)}**")
+            st.markdown(f"- מה נכון: **{html.escape(correct)}**")
+            st.divider()
 
         c1, c2 = st.columns(2)
         if c1.button("שחק שוב"):
             reset_game_state(); ensure_game_loaded(); st.session_state.phase = "quiz"; st.rerun()
-        if c2.button("סיום"):
+        if c2.button("חזור למסך הבית"):
             reset_game_state(); st.session_state.phase = "welcome"; st.rerun()
 
 # ========================= ממשק אדמין =========================
@@ -398,12 +394,9 @@ def admin_login_ui():
 def admin_menu_ui():
     st.subheader("לוח מנהל")
     c1, c2, c3 = st.columns(3)
-    if c1.button("ערוך תוכן"):  st.session_state["admin_screen"] = "edit_list"; st.rerun()
-    if c2.button("מחק תוכן"):  st.session_state["admin_screen"] = "delete_list"; st.rerun()
+    if c1.button("ערוך תוכן"): st.session_state["admin_screen"] = "edit_list"; st.rerun()
+    if c2.button("מחק תוכן"): st.session_state["admin_screen"] = "delete_list"; st.rerun()
     if c3.button("הוסף תוכן"): st.session_state["admin_screen"] = "add_form"; st.rerun()
-    st.divider()
-    if st.button("יציאה ממנהל"):
-        reset_admin_state(); st.rerun()
 
 def _get_question_by_id(qid: str) -> Optional[Dict[str,Any]]:
     for q in _read_questions():
@@ -431,20 +424,21 @@ def admin_edit_detail_ui():
         st.error("השאלה לא נמצאה"); st.session_state["admin_screen"]="edit_list"; return
 
     st.subheader("תצוגת שאלה ועריכה")
-    _render_media(q)
+    _render_media(q, key=f"adm_{qid}")
     st.markdown(f"### {q['question']}")
     st.caption(f"קטגוריה: {q.get('category','')} | קושי: {q.get('difficulty','')}")
 
     col1, col2 = st.columns(2)
     ans = q["answers"]
-    def colored(label: str, ok: bool):
+    def chip(label: str, ok: bool):
         css = "badge-ok" if ok else "badge-err"
         st.markdown(f"<div class='{css}' style='margin-bottom:8px'>{html.escape(label)}</div>", unsafe_allow_html=True)
     with col1:
-        for a in ans[::2]: colored(a["text"], a.get("is_correct",False))
+        for a in ans[::2]: chip(a["text"], a.get("is_correct",False))
     with col2:
-        for a in ans[1::2]: colored(a["text"], a.get("is_correct",False))
+        for a in ans[1::2]: chip(a["text"], a.get("is_correct",False))
 
+    # ----- מצב עריכה -----
     st.divider()
     colA, colB, colC = st.columns(3)
     if colA.button("ערוך שינויים"):
@@ -456,6 +450,7 @@ def admin_edit_detail_ui():
         new_q["category"]   = st.session_state.get("edit_q_cat", q.get("category",""))
         new_q["difficulty"] = st.session_state.get("edit_q_diff", q.get("difficulty",2))
 
+        # רדיו 1..4 -> המרת שמירה ל-0..3
         correct_index_1based = st.session_state.get("edit_correct_idx", 1)
         correct_index_0based = max(0, min(3, int(correct_index_1based) - 1))
 
@@ -503,9 +498,13 @@ def admin_edit_detail_ui():
         up = st.file_uploader("החלף קובץ", type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg"], key="edit_q_upload")
         if up:
             saved = _save_uploaded_to_storage(up)
+            # מילוי אוטומטי של ה-URL שנוצר
             st.session_state["edit_q_media_url"] = saved
-            st.success(f"הוחלף לקובץ: {saved}")
-        preview_url = _signed_or_raw(st.session_state.get("edit_q_media_url", q.get("content_url","")), 300)
+            st.success(f"קובץ הוחלף ונשמר: {saved}")
+            preview_url = _signed_or_raw(saved, 300)
+        else:
+            preview_url = _signed_or_raw(st.session_state.get("edit_q_media_url", q.get("content_url","")), 300)
+
         if st.session_state.get("edit_q_type", t) == "image" and preview_url:
             st.image(preview_url, use_container_width=True)
         elif st.session_state.get("edit_q_type", t) == "video" and preview_url:
@@ -543,15 +542,16 @@ def admin_add_form_ui():
         up = st.file_uploader("הוסף קובץ (עדיף ≤ 2MB, ≤ 5s)", type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg"], key="add_upload")
         if up:
             media_url = _save_uploaded_to_storage(up)
-            st.session_state["add_media_url"] = media_url
+            st.session_state["add_media_url"] = media_url  # מילוי אוטומטי
             st.success(f"קובץ נשמר: {media_url}")
-            signed = _signed_or_raw(media_url, 300)
-            if t=="image": st.image(signed, use_container_width=True)
-            elif t=="video": st.video(signed)
-            elif t=="audio": st.audio(signed)
-        media_url = st.text_input("או הדבק URL (לא חובה)", value=media_url, key="add_media_url_input")
-        # תאום: אם שדה הטקסט השתנה – עדכן בסשן
+        signed = _signed_or_raw(media_url, 300) if media_url else ""
+        if t=="image" and signed: st.image(signed, use_container_width=True)
+        elif t=="video" and signed: st.video(signed)
+        elif t=="audio" and signed: st.audio(signed)
+        media_url = st.text_input("או הדבק URL (לא חובה)", value=media_url, key="add_media_url_text")
+        # אם המשתמש ערך ידנית – נעדכן את הערך המאוחסן
         st.session_state["add_media_url"] = media_url
+
     q_text = st.text_input("טקסט השאלה", key="add_q_text")
 
     st.markdown("**תשובות**")
@@ -561,6 +561,7 @@ def admin_add_form_ui():
         with c:
             a_vals.append(st.text_input(f"תשובה {i+1}", key=f"add_ans_{i}"))
 
+    # רדיו מוצג 1..4, שמירה (i+1)
     correct_idx_1based = st.radio("סמן נכונה", options=[1,2,3,4], index=0, horizontal=True, key="add_correct_idx")
     category = st.text_input("קטגוריה (אופציונלי)", value="", key="add_cat")
     difficulty = st.number_input("קושי 1-5", min_value=1, max_value=5, value=2, key="add_diff")
@@ -569,26 +570,20 @@ def admin_add_form_ui():
     st.markdown("**תצוגת תצוגה מקדימה**")
     preview = {"type": t, "content_url": media_url, "question": q_text,
                "answers": [{"text": a_vals[i], "is_correct": (i+1)==correct_idx_1based} for i in range(4)]}
-    if t!="text" and media_url:
-        signed_prev = _signed_or_raw(media_url, 300)
-        if t=="image": st.image(signed_prev, use_container_width=True)
-        elif t=="video": st.video(signed_prev)
-        elif t=="audio": st.audio(signed_prev)
+    _render_media(preview, key="add_preview")
     st.markdown(f"### {q_text if q_text else '...'}")
-
     st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
-        for i in (0,2):
+        for i in [0,2]:
             if i<len(a_vals):
                 cls = "badge-ok" if (i+1)==correct_idx_1based else "badge-err"
-                st.markdown(f"<div class='{cls}' style='margin-bottom:8px'>{html.escape(a_vals[i] or '—')}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='{cls}' style='margin-bottom:8px'>{html.escape(a_vals[i])}</div>", unsafe_allow_html=True)
     with col2:
-        for i in (1,3):
+        for i in [1,3]:
             if i<len(a_vals):
                 cls = "badge-ok" if (i+1)==correct_idx_1based else "badge-err"
-                st.markdown(f"<div class='{cls}' style='margin-bottom:8px'>{html.escape(a_vals[i] or '—')}</div>", unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown(f"<div class='{cls}' style='margin-bottom:8px'>{html.escape(a_vals[i])}</div>", unsafe_allow_html=True)
 
     st.divider()
     if st.button("שמור ועדכן"):
@@ -611,11 +606,12 @@ def admin_add_form_ui():
             all_q.append(new_item)
             _write_questions(all_q)
             st.success("נשמר למאגר")
+            # ניקוי שדות
+            for k in ["add_media_url","add_media_url_text","add_q_text","add_cat","add_diff","add_upload"]:
+                st.session_state.pop(k, None)
             st.session_state["admin_screen"]="menu"; st.rerun()
-    if st.button("חזרה"):
-        st.session_state["admin_screen"]="menu"; st.rerun()
 
-# ניהול ניווט אדמין
+# ניהול ניווט אדמין - מוצג רק כשבאמת במצב אדמין
 if st.session_state.get("admin_mode"):
     st.divider()
     screen = st.session_state.get("admin_screen","login")
