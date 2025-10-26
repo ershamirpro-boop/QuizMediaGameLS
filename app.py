@@ -11,13 +11,13 @@ DATA_DIR = pathlib.Path("data")
 MEDIA_DIR = pathlib.Path("media")
 LOCAL_QUESTIONS_JSON = DATA_DIR / "questions.json"
 
-ADMIN_CODE = os.getenv("ADMIN_CODE", "admin246")  # אפשר להגדיר בסיקרטס
+ADMIN_CODE = os.getenv("ADMIN_CODE", "admin246")
 FIXED_N_QUESTIONS = 15
 
-# Supabase (חינמי) - דרך Secrets
+# Supabase - אופציונלי דרך Secrets
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "")           # לדוגמה: quiz-media
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "")
 QUESTIONS_OBJECT_PATH = os.getenv("QUESTIONS_OBJECT_PATH", "data/questions.json")
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -119,25 +119,39 @@ label,p,li,.stMarkdown{text-align:right}
   background:#23C483!important;color:#fff!important;border:0!important
 }
 
-/* ===== גריד תשובות 2x2 מבוסס רדיו + הדגשת בחירה ===== */
-.answer-grid .stRadio > div{
+/* ===== תשובות ככפתורים - אפשרות 1: רקע אדום כשנבחר ===== */
+.answer-grid [role="radiogroup"]{
   display:grid;grid-template-columns:1fr 1fr;gap:10px
 }
+/* מסתיר את נקודות הרדיו */
+.answer-grid input[type="radio"]{display:none !important;}
+/* הופך label לכפתור */
 .answer-grid label{
   border:1px solid rgba(0,0,0,.15);
   border-radius:12px;
   padding:12px 14px;
   min-height:56px;
-  display:flex;align-items:center;
-  transition:all .15s ease-in-out;
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;
+  cursor:pointer;user-select:none;
+  transition:all .12s ease-in-out;
+  background:rgba(255,255,255,.04);
 }
-/* הדגשת האפשרות שנבחרה - עובד בכרום, אדג', פיירפוקס */
+.answer-grid label:hover{
+  box-shadow:0 0 0 2px rgba(0,0,0,.06) inset;
+}
+/* כשהאופציה נבחרה - מילוי אדום מודגש */
 .answer-grid label:has(input:checked){
   background:#ff4b4b !important;
-  color:#ffffff !important;
+  color:#fff !important;
   border-color:#ff4b4b !important;
   box-shadow:0 0 0 2px rgba(255,75,75,.25) inset !important;
   font-weight:700;
+}
+/* פוקוס מקלדת */
+.answer-grid label:has(input:focus-visible){
+  outline:3px solid rgba(59,130,246,.55);
+  outline-offset:2px;
 }
 
 /* מדיה */
@@ -163,6 +177,11 @@ img{max-height:52vh;object-fit:contain}
 .primary-cta .stButton>button{
   width:100%;padding:16px 18px;font-size:20px;border-radius:12px;
   background:#ff006b !important;color:#fff !important;border:0 !important
+}
+
+/* מובייל - טור אחד */
+@media (max-width:520px){
+  .answer-grid [role="radiogroup"]{grid-template-columns:1fr}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -208,30 +227,9 @@ def _render_media(q: Dict[str, Any], key: str):
     elif t=="video": st.video(signed)
     elif t=="audio": st.audio(signed)
 
-# ========================= Header =========================
-st.title("🎯 משחק טריוויה מדיה")
-st.caption("משחק פתוח ואנונימי. מדיה נטענת באופן פרטי ומאובטח. אין שמירת זהות.")
-
-# "כניסת מנהלים" יופיע רק במסך פתיחה
-show_admin_entry = (st.session_state.get("phase","welcome") == "welcome")
-if show_admin_entry:
-    col_top_left, col_top_right = st.columns([3,1])
-    with col_top_right:
-        if st.button("כניסת מנהלים", key="admin_entry"):
-            st.session_state["admin_mode"] = True
-            st.session_state["admin_screen"] = "login"
-            st.rerun()
-
-# אם לא במצב אדמין - אפס state של אדמין כדי לא לזלוג למסכים
-if not st.session_state.get("admin_mode"):
-    for k in ["admin_screen","admin_edit_mode","admin_edit_qid"]:
-        st.session_state.pop(k, None)
-
-# ========================= פונקציית הצגה לבחירת תשובה 2x2 =========================
+# ========================= גריד תשובות ככפתורים =========================
 def answers_grid(question: Dict[str, Any], q_index: int, key_prefix: str):
-    # רשימת טקסטים של תשובות
     opts = [a["text"] for a in question["answers"]]
-    # ערך נוכחי אם יש
     current = st.session_state.answers_map.get(q_index, None)
 
     st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
@@ -244,9 +242,27 @@ def answers_grid(question: Dict[str, Any], q_index: int, key_prefix: str):
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # עדכון ה־state אם יש שינוי
     if picked is not None and picked != current:
         st.session_state.answers_map[q_index] = picked
+
+# ========================= Header =========================
+st.title("🎯 משחק טריוויה מדיה")
+st.caption("משחק פתוח ואנונימי. מדיה נטענת באופן פרטי ומאובטח. אין שמירת זהות.")
+
+# "כניסת מנהלים" רק במסך פתיחה
+show_admin_entry = (st.session_state.get("phase","welcome") == "welcome")
+if show_admin_entry:
+    col_top_left, col_top_right = st.columns([3,1])
+    with col_top_right:
+        if st.button("כניסת מנהלים", key="admin_entry"):
+            st.session_state["admin_mode"] = True
+            st.session_state["admin_screen"] = "login"
+            st.rerun()
+
+# אם לא במצב אדמין - איפוס מצבים רלוונטיים
+if not st.session_state.get("admin_mode"):
+    for k in ["admin_screen","admin_edit_mode","admin_edit_qid"]:
+        st.session_state.pop(k, None)
 
 # ========================= UI משתמש רגיל =========================
 if not st.session_state.get("admin_mode"):
@@ -278,7 +294,6 @@ if not st.session_state.get("admin_mode"):
             if q.get("category"):
                 st.caption(f"קטגוריה: {q.get('category')} | קושי: {q.get('difficulty','לא צוין')}")
 
-            # גריד תשובות 2x2 עם הדגשה ברקע אדום לאפשרות שנבחרה
             answers_grid(q, idx, key_prefix="quiz")
 
             st.markdown('<div class="bottom-bar">', unsafe_allow_html=True)
@@ -287,7 +302,7 @@ if not st.session_state.get("admin_mode"):
                 if st.button("הקודם ↩︎", disabled=(idx==0)):
                     st.session_state.current_idx -= 1; st.rerun()
             with nav_r:
-                # הסרנו את "↪︎ הבא" לפי בקשתך
+                # לפי בקשתך - אין כפתור "↪︎ הבא"
                 st.button("↪︎ הבא", disabled=True)
 
             c1, c2 = st.columns(2)
@@ -312,10 +327,8 @@ if not st.session_state.get("admin_mode"):
         _render_media(q, key=f"rev{ridx}")
         st.markdown(f"**{q['question']}**")
 
-        # גריד תשובות 2x2 עם הדגשה ברקע אדום
         answers_grid(q, ridx, key_prefix="review")
 
-        # ניווט בין שאלות סקירה
         cols = st.columns(2)
         with cols[0]:
             if st.button("← הקודמת", disabled=(ridx==0)):
@@ -324,7 +337,6 @@ if not st.session_state.get("admin_mode"):
             if st.button("הבאה →", disabled=(ridx==len(qlist)-1)):
                 st.session_state.review_idx += 1; st.rerun()
 
-        # CTA גדול לבדיקה
         st.divider()
         st.markdown('<div class="primary-cta">', unsafe_allow_html=True)
         submit_clicked = st.button("בדוק אותי 💥", key="check_exam_big")
@@ -524,7 +536,7 @@ def admin_add_form_ui():
     t = st.selectbox("סוג", ["image","video","audio","text"], key="add_type")
     media_url = st.session_state.get("add_media_url","")
     if t!="text":
-        up = st.file_uploader("הוסף קובץ (עדיף ≤ 2MB, ≤ 5s)", type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg"], key="add_upload")
+        up = st.file_uploader("הוסף קובץ", type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg"], key="add_upload")
         if up:
             media_url = _save_uploaded_to_storage(up)
             st.session_state["add_media_url"] = media_url
@@ -533,7 +545,7 @@ def admin_add_form_ui():
         if t=="image" and signed: st.image(signed, use_container_width=True)
         elif t=="video" and signed: st.video(signed)
         elif t=="audio" and signed: st.audio(signed)
-        media_url = st.text_input("או הדבק URL (לא חובה)", value=media_url, key="add_media_url_text")
+        media_url = st.text_input("או הדבק URL", value=media_url, key="add_media_url_text")
         st.session_state["add_media_url"] = media_url
 
     q_text = st.text_input("טקסט השאלה", key="add_q_text")
@@ -593,7 +605,7 @@ def admin_add_form_ui():
                 st.session_state.pop(k, None)
             st.session_state["admin_screen"]="menu"; st.rerun()
 
-# ניהול ניווט אדמין - מוצג רק כשבאמת במצב אדמין
+# ניהול ניווט אדמין
 if st.session_state.get("admin_mode"):
     st.divider()
     screen = st.session_state.get("admin_screen","login")
