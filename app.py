@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, json, random, uuid, pathlib, html, mimetypes, io, tempfile
+import os, json, random, uuid, pathlib, html, mimetypes
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import streamlit as st
@@ -36,15 +36,9 @@ def _get_supabase():
     return _supabase
 
 def _sb_upload_bytes(object_path: str, data: bytes, content_type: str = "application/octet-stream") -> str:
-    """
-    העלאה ל-Storage ב-supabase-py v2: סדר ארגומנטים -> (path, file, file_options)
-    file_options חייבים מפתחות contentType / upsert כמחרוזות כדי למנוע TypeError של headers.
-    """
     sb = _get_supabase(); assert sb is not None
     file_options = {"contentType": content_type, "upsert": "true"}
-    # הספרייה תומכת ב-bytes ישירות
-    res = sb.storage.from_(SUPABASE_BUCKET).upload(object_path, data, file_options=file_options)
-    # מחזיר נתיב בסכימת sb://
+    sb.storage.from_(SUPABASE_BUCKET).upload(object_path, data, file_options=file_options)
     return f"sb://{SUPABASE_BUCKET}/{object_path}"
 
 def upload_to_supabase(file_bytes: bytes, filename: str) -> str:
@@ -125,15 +119,20 @@ label,p,li,.stMarkdown{text-align:right}
   background:#23C483!important;color:#fff!important;border:0!important
 }
 
-/* ===== תשובות (2x2) עם הדגשת בחירה ===== */
-.answer-grid .stButton>button{
-  width:100%;padding:14px 16px;font-size:18px;border-radius:12px;
-  min-height:56px;border:1px solid rgba(0,0,0,.15);
+/* ===== גריד תשובות 2x2 מבוסס רדיו + הדגשת בחירה ===== */
+.answer-grid .stRadio > div{
+  display:grid;grid-template-columns:1fr 1fr;gap:10px
+}
+.answer-grid label{
+  border:1px solid rgba(0,0,0,.15);
+  border-radius:12px;
+  padding:12px 14px;
+  min-height:56px;
+  display:flex;align-items:center;
   transition:all .15s ease-in-out;
 }
-.choice{margin-bottom:10px}
-.choice.selected .stButton>button,
-.choice.selected button{
+/* הדגשת האפשרות שנבחרה - עובד בכרום, אדג', פיירפוקס */
+.answer-grid label:has(input:checked){
   background:#ff4b4b !important;
   color:#ffffff !important;
   border-color:#ff4b4b !important;
@@ -141,6 +140,7 @@ label,p,li,.stMarkdown{text-align:right}
   font-weight:700;
 }
 
+/* מדיה */
 img{max-height:52vh;object-fit:contain}
 .video-shell,.audio-shell{width:100%}
 .video-shell video,.audio-shell audio{width:100%}
@@ -208,45 +208,11 @@ def _render_media(q: Dict[str, Any], key: str):
     elif t=="video": st.video(signed)
     elif t=="audio": st.audio(signed)
 
-# ========================= תשובה עם סימון =========================
-def answer_btn(label: str, grid_key: int, btn_idx: int) -> bool:
-    """
-    כפתור תשובה עם סימון אדום ברור. הטריק:
-    שמים div עוגן לפני הכפתור, ואז אם זו הבחירה – מזריקים <style>
-    שצובע את ה-div של הכפתור שבא אחרי העוגן.
-    """
-    picked = st.session_state.answers_map.get(grid_key)
-    selected = (picked == label)
-
-    anchor_id = f"mk_{grid_key}_{btn_idx}"
-    # עוגן שמופיע מיד לפני ה-StButton
-    st.markdown(f"<div id='{anchor_id}'></div>", unsafe_allow_html=True)
-
-    # הכפתור עצמו (ברוחב מלא)
-    clicked = st.button(label, key=f"ans_{grid_key}_{btn_idx}", use_container_width=True)
-
-    # אם זו הבחירה – צובעים את הכפתור שאחרי העוגן
-    if selected:
-        st.markdown(f"""
-        <style>
-        /* div#{anchor_id} + div = מיכל הכפתור של Streamlit מיד אחרי העוגן */
-        div#{anchor_id} + div button {{
-            background:#ff4b4b !important;
-            color:#ffffff !important;
-            border-color:#ff4b4b !important;
-            box-shadow:0 0 0 2px rgba(255,75,75,.25) inset !important;
-            font-weight:700;
-        }}
-        </style>
-        """, unsafe_allow_html=True)
-
-    return clicked
-
 # ========================= Header =========================
 st.title("🎯 משחק טריוויה מדיה")
 st.caption("משחק פתוח ואנונימי. מדיה נטענת באופן פרטי ומאובטח. אין שמירת זהות.")
 
-# "כניסת מנהלים" יופיע **רק** במסך פתיחה
+# "כניסת מנהלים" יופיע רק במסך פתיחה
 show_admin_entry = (st.session_state.get("phase","welcome") == "welcome")
 if show_admin_entry:
     col_top_left, col_top_right = st.columns([3,1])
@@ -260,6 +226,27 @@ if show_admin_entry:
 if not st.session_state.get("admin_mode"):
     for k in ["admin_screen","admin_edit_mode","admin_edit_qid"]:
         st.session_state.pop(k, None)
+
+# ========================= פונקציית הצגה לבחירת תשובה 2x2 =========================
+def answers_grid(question: Dict[str, Any], q_index: int, key_prefix: str):
+    # רשימת טקסטים של תשובות
+    opts = [a["text"] for a in question["answers"]]
+    # ערך נוכחי אם יש
+    current = st.session_state.answers_map.get(q_index, None)
+
+    st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
+    picked = st.radio(
+        label="בחר תשובה",
+        options=opts,
+        index=opts.index(current) if current in opts else None,
+        key=f"{key_prefix}_radio_{q_index}",
+        label_visibility="collapsed",
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # עדכון ה־state אם יש שינוי
+    if picked is not None and picked != current:
+        st.session_state.answers_map[q_index] = picked
 
 # ========================= UI משתמש רגיל =========================
 if not st.session_state.get("admin_mode"):
@@ -291,17 +278,8 @@ if not st.session_state.get("admin_mode"):
             if q.get("category"):
                 st.caption(f"קטגוריה: {q.get('category')} | קושי: {q.get('difficulty','לא צוין')}")
 
-            st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
-            col1, col2 = st.columns(2, vertical_alignment="center")
-            # תשובות 0,2 בעמודה שמאל; 1,3 בעמודה ימין (עדיין RTL)
-            with col1:
-                for j, i in enumerate([0,2]):
-                    if answer_btn(q["answers"][i]["text"], idx, i):
-                        st.session_state.answers_map[idx] = q["answers"][i]["text"]; st.rerun()
-            with col2:
-                for j, i in enumerate([1,3]):
-                    if answer_btn(q["answers"][i]["text"], idx, i):
-                        st.session_state.answers_map[idx] = q["answers"][i]["text"]; st.rerun()
+            # גריד תשובות 2x2 עם הדגשה ברקע אדום לאפשרות שנבחרה
+            answers_grid(q, idx, key_prefix="quiz")
 
             st.markdown('<div class="bottom-bar">', unsafe_allow_html=True)
             nav_l, nav_r = st.columns(2)
@@ -309,8 +287,8 @@ if not st.session_state.get("admin_mode"):
                 if st.button("הקודם ↩︎", disabled=(idx==0)):
                     st.session_state.current_idx -= 1; st.rerun()
             with nav_r:
-                if st.button("↪︎ הבא", disabled=(idx==len(qlist)-1)):
-                    st.session_state.current_idx += 1; st.rerun()
+                # הסרנו את "↪︎ הבא" לפי בקשתך
+                st.button("↪︎ הבא", disabled=True)
 
             c1, c2 = st.columns(2)
             if c1.button("שמור והמשך לשאלה הבאה", disabled=(idx not in st.session_state.answers_map)):
@@ -333,19 +311,9 @@ if not st.session_state.get("admin_mode"):
         st.write(f"שאלה {ridx+1} מתוך {len(qlist)}")
         _render_media(q, key=f"rev{ridx}")
         st.markdown(f"**{q['question']}**")
-        current_pick = st.session_state.answers_map.get(ridx)
 
-        # תצוגת תשובות 2x2 עם סימון אדום
-        st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
-        col1, col2 = st.columns(2, vertical_alignment="center")
-        with col1:
-            for i in [0,2]:
-                if answer_btn(q["answers"][i]["text"], ridx, i):
-                    st.session_state.answers_map[ridx] = q["answers"][i]["text"]; st.rerun()
-        with col2:
-            for i in [1,3]:
-                if answer_btn(q["answers"][i]["text"], ridx, i):
-                    st.session_state.answers_map[ridx] = q["answers"][i]["text"]; st.rerun()
+        # גריד תשובות 2x2 עם הדגשה ברקע אדום
+        answers_grid(q, ridx, key_prefix="review")
 
         # ניווט בין שאלות סקירה
         cols = st.columns(2)
@@ -380,10 +348,9 @@ if not st.session_state.get("admin_mode"):
             st.warning("🫣 קורה לכולם, אולי ננסה שוב?")
 
         st.divider()
-        # פירוט המבחן (מה סומן ומה נכון)
         st.markdown("### פירוט המבחן (מה סימנת ומה נכון)")
         for i, q in enumerate(qlist):
-            picked = st.session_state.answers_map.get(i, "—")
+            picked = st.session_state.answers_map.get(i, "-")
             correct = next(a["text"] for a in q["answers"] if a.get("is_correct"))
             ok = (picked == correct)
             st.markdown(f"**{i+1}. {q['question']}**")
@@ -459,7 +426,6 @@ def admin_edit_detail_ui():
     with col2:
         for a in ans[1::2]: chip(a["text"], a.get("is_correct",False))
 
-    # ----- מצב עריכה -----
     st.divider()
     colA, colB, colC = st.columns(3)
     if colA.button("ערוך שינויים"):
@@ -471,7 +437,6 @@ def admin_edit_detail_ui():
         new_q["category"]   = st.session_state.get("edit_q_cat", q.get("category",""))
         new_q["difficulty"] = st.session_state.get("edit_q_diff", q.get("difficulty",2))
 
-        # רדיו 1..4 -> המרת שמירה ל-0..3
         correct_index_1based = st.session_state.get("edit_correct_idx", 1)
         correct_index_0based = max(0, min(3, int(correct_index_1based) - 1))
 
@@ -519,7 +484,6 @@ def admin_edit_detail_ui():
         up = st.file_uploader("החלף קובץ", type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg"], key="edit_q_upload")
         if up:
             saved = _save_uploaded_to_storage(up)
-            # מילוי אוטומטי של ה-URL שנוצר
             st.session_state["edit_q_media_url"] = saved
             st.success(f"קובץ הוחלף ונשמר: {saved}")
             preview_url = _signed_or_raw(saved, 300)
@@ -563,14 +527,13 @@ def admin_add_form_ui():
         up = st.file_uploader("הוסף קובץ (עדיף ≤ 2MB, ≤ 5s)", type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg"], key="add_upload")
         if up:
             media_url = _save_uploaded_to_storage(up)
-            st.session_state["add_media_url"] = media_url  # מילוי אוטומטי
+            st.session_state["add_media_url"] = media_url
             st.success(f"קובץ נשמר: {media_url}")
         signed = _signed_or_raw(media_url, 300) if media_url else ""
         if t=="image" and signed: st.image(signed, use_container_width=True)
         elif t=="video" and signed: st.video(signed)
         elif t=="audio" and signed: st.audio(signed)
         media_url = st.text_input("או הדבק URL (לא חובה)", value=media_url, key="add_media_url_text")
-        # אם המשתמש ערך ידנית – נעדכן את הערך המאוחסן
         st.session_state["add_media_url"] = media_url
 
     q_text = st.text_input("טקסט השאלה", key="add_q_text")
@@ -582,7 +545,6 @@ def admin_add_form_ui():
         with c:
             a_vals.append(st.text_input(f"תשובה {i+1}", key=f"add_ans_{i}"))
 
-    # רדיו מוצג 1..4, שמירה (i+1)
     correct_idx_1based = st.radio("סמן נכונה", options=[1,2,3,4], index=0, horizontal=True, key="add_correct_idx")
     category = st.text_input("קטגוריה (אופציונלי)", value="", key="add_cat")
     difficulty = st.number_input("קושי 1-5", min_value=1, max_value=5, value=2, key="add_diff")
@@ -627,7 +589,6 @@ def admin_add_form_ui():
             all_q.append(new_item)
             _write_questions(all_q)
             st.success("נשמר למאגר")
-            # ניקוי שדות
             for k in ["add_media_url","add_media_url_text","add_q_text","add_cat","add_diff","add_upload"]:
                 st.session_state.pop(k, None)
             st.session_state["admin_screen"]="menu"; st.rerun()
