@@ -37,15 +37,26 @@ def _upload_path_to_supabase(local_path: str, original_name: str) -> str:
     """מעלה קובץ קיים מהדיסק ל-Supabase ומחזיר sb://bucket/path"""
     sb = _get_supabase(); assert sb is not None, "Supabase לא מוגדר"
     ext = pathlib.Path(original_name).suffix.lower() or pathlib.Path(local_path).suffix.lower()
-    content_type = mimetypes.guess_type(original_name)[0] or mimetypes.guess_type(local_path)[0] or "application/octet-stream"
+    content_type = (
+        mimetypes.guess_type(original_name)[0]
+        or mimetypes.guess_type(local_path)[0]
+        or "application/octet-stream"
+    )
     folder = datetime.utcnow().strftime("media/%Y/%m")
     object_path = f"{folder}/{uuid.uuid4().hex}{ext}"
-    # storage3 מצפה לנתיב קובץ כ- str
-    sb.storage.from_(SUPABASE_BUCKET).upload(
-        object_path,
-        file=str(local_path),
-        file_options={"contentType": content_type, "upsert": True},
-    )
+
+    try:
+        # שים לב: המפתחות כאן הם בסנייק־קייס (content_type, upsert)
+        sb.storage.from_(SUPABASE_BUCKET).upload(
+            object_path,
+            file=str(local_path),
+            file_options={"content_type": content_type, "upsert": True},
+        )
+    except Exception as e:
+        # הודעה ברורה במסך במקרה תקלה
+        st.error(f"נכשל להעלות ל-Supabase: {e!r}")
+        raise
+
     return f"sb://{SUPABASE_BUCKET}/{object_path}"
 
 def upload_to_supabase_from_bytes(file_bytes: bytes, original_name: str) -> str:
@@ -56,8 +67,10 @@ def upload_to_supabase_from_bytes(file_bytes: bytes, original_name: str) -> str:
     try:
         return _upload_path_to_supabase(tmp_path, original_name)
     finally:
-        try: os.remove(tmp_path)
-        except Exception: pass
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
 
 def sign_url_sb(sb_url: str, expires_seconds: int = 300) -> str:
     assert sb_url.startswith("sb://")
