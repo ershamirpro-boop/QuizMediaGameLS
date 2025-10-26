@@ -211,14 +211,35 @@ def _render_media(q: Dict[str, Any], key: str):
 # ========================= תשובה עם סימון =========================
 def answer_btn(label: str, grid_key: int, btn_idx: int) -> bool:
     """
-    כפתור תשובה עם סימון ברור: הרקע הופך לאדום אם זו הבחירה הנוכחית.
-    נשען על st.session_state.answers_map[grid_key].
+    כפתור תשובה עם סימון אדום ברור. הטריק:
+    שמים div עוגן לפני הכפתור, ואז אם זו הבחירה – מזריקים <style>
+    שצובע את ה-div של הכפתור שבא אחרי העוגן.
     """
-    picked = st.session_state.answers_map.get(grid_key, None)
+    picked = st.session_state.answers_map.get(grid_key)
     selected = (picked == label)
-    st.markdown(f'<div class="choice {"selected" if selected else ""}">', unsafe_allow_html=True)
+
+    anchor_id = f"mk_{grid_key}_{btn_idx}"
+    # עוגן שמופיע מיד לפני ה-StButton
+    st.markdown(f"<div id='{anchor_id}'></div>", unsafe_allow_html=True)
+
+    # הכפתור עצמו (ברוחב מלא)
     clicked = st.button(label, key=f"ans_{grid_key}_{btn_idx}", use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+
+    # אם זו הבחירה – צובעים את הכפתור שאחרי העוגן
+    if selected:
+        st.markdown(f"""
+        <style>
+        /* div#{anchor_id} + div = מיכל הכפתור של Streamlit מיד אחרי העוגן */
+        div#{anchor_id} + div button {{
+            background:#ff4b4b !important;
+            color:#ffffff !important;
+            border-color:#ff4b4b !important;
+            box-shadow:0 0 0 2px rgba(255,75,75,.25) inset !important;
+            font-weight:700;
+        }}
+        </style>
+        """, unsafe_allow_html=True)
+
     return clicked
 
 # ========================= Header =========================
