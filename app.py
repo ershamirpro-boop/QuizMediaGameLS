@@ -147,7 +147,6 @@ def _ensure_jpeg_for_heic(upload) -> tuple[bytes, str, str]:
             new_name = pathlib.Path(name).with_suffix(".jpg").name
             return jpeg_bytes, new_name, "image/jpeg"
         except Exception:
-            # נכשלה המרה - נחזיר כמו שהוא
             return bytes(raw), name, content_type
     else:
         return bytes(raw), name, content_type
@@ -163,9 +162,7 @@ def _save_uploaded_file_local(upload) -> str:
 
 def _upload_bytes_to_supabase(object_path: str, file_bytes: bytes, content_type: str) -> str:
     sb = _get_supabase(); assert sb is not None
-    # חייבים file_options כמחרוזות
     file_options = {"contentType": content_type, "upsert": "true"}
-    # הספרייה תומכת ב-bytes ישירות
     sb.storage.from_(SUPABASE_BUCKET).upload(object_path, file_bytes, file_options=file_options)
     return _sburl(SUPABASE_BUCKET, object_path)
 
@@ -179,8 +176,8 @@ def _save_uploaded_to_storage(upload) -> str:
         ext = pathlib.Path(fixed_name).suffix.lower()
         object_path = f"{folder}/{uuid.uuid4().hex}{ext}"
         return _upload_bytes_to_supabase(object_path, file_bytes, content_type)
-    # מקומי
-    class _Tmp:  # לעטוף את bytes לשימוש בפונקציה המקומית
+    # שמירה מקומית
+    class _Tmp:
         name = fixed_name
         def getbuffer(self): return file_bytes
     return _save_uploaded_file_local(_Tmp())
@@ -215,7 +212,6 @@ def _write_questions(all_q: List[Dict[str, Any]]) -> None:
     """כותב JSON + מנקה cache של הקריאה."""
     payload = json.dumps(all_q, ensure_ascii=False, indent=2).encode("utf-8")
     if _supabase_on():
-        # העלאה דרך קובץ זמני + file_options תקינים
         sb = _get_supabase(); assert sb is not None
         file_options = {"contentType": "application/json; charset=utf-8", "upsert": "true"}
         with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
@@ -228,7 +224,7 @@ def _write_questions(all_q: List[Dict[str, Any]]) -> None:
             except Exception: pass
     else:
         LOCAL_QUESTIONS_JSON.write_bytes(payload)
-    _read_questions_cached.clear()  # invalidate cache לקריאה מהירה אח"כ
+    _read_questions_cached.clear()
 
 # ========================= Utilities =========================
 def reset_admin_state():
@@ -330,7 +326,7 @@ if not st.session_state.get("admin_mode"):
         else:
             qlist = st.session_state.questions
             idx = st.session_state.current_idx
-            if idx >= len(qlist):  # הגנה על גבולות
+            if idx >= len(qlist):
                 st.session_state.current_idx = max(0, len(qlist)-1)
                 st.rerun()
             q = qlist[idx]
@@ -340,10 +336,8 @@ if not st.session_state.get("admin_mode"):
             if q.get("category"):
                 st.caption(f"קטגוריה: {q.get('category')} | קושי: {q.get('difficulty','לא צוין')}")
 
-            # תשובות
             answers_grid(q, idx, key_prefix="quiz")
 
-            # פס תחתון
             st.markdown('<div class="bottom-bar">', unsafe_allow_html=True)
             c_left, c_mid, c_right = st.columns(3)
             with c_left:
@@ -453,7 +447,7 @@ def admin_edit_list_ui():
     st.subheader("ערוך תוכן")
     all_q = _read_questions_cached()
     if not all_q:
-        st.info("אין שאלות לעריכה"); 
+        st.info("אין שאלות לעריכה")
         if st.button("חזרה"): st.session_state["admin_screen"] = "menu"; st.rerun()
         return
     options = {f"{i+1}. {q['question'][:80]}": q["id"] for i,q in enumerate(all_q)}
@@ -570,22 +564,25 @@ def admin_edit_detail_ui():
         if "edit_q_media_url" not in st.session_state:
             st.session_state["edit_q_media_url"] = q.get("content_url", "")
 
+        # --- עדכון: מניעת העלאות כפולות במסך העריכה ---
         up = st.file_uploader(
             "החלף קובץ (תמונה/וידאו/אודיו)",
             type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
             key="edit_q_upload"
         )
         if up:
-            saved = _save_uploaded_to_storage(up)
-            st.session_state["edit_q_media_url"] = saved  # מעדכן את ה-URL החדש
-            st.success(f"קובץ הועלה: {saved}")
-            st.rerun()  # רענון כדי שה-text_input יציג את הערך החדש
+            up_id = (getattr(up, "file_id", None), up.name, getattr(up, "size", None))
+            if st.session_state.get("edit_last_upload_id") != up_id:
+                saved = _save_uploaded_to_storage(up)
+                st.session_state["edit_q_media_url"] = saved
+                st.session_state["edit_last_upload_id"] = up_id
+                st.success(f"קובץ הועלה: {saved}")
+                st.rerun()
 
-        # הווידג'ט שולט בערך (אין השמה חזרה ל-session_state בשורה הזו!)
+        # הווידג'ט שולט בערך
         if st.session_state.get("edit_q_media_url", ""):
             st.text_input("URL / נתיב", key="edit_q_media_url")
         else:
-            # בפעם הראשונה בלבד אפשר לתת value – אם ה-key בדיוק נוצר קודם
             st.text_input("URL / נתיב", value=q.get("content_url",""), key="edit_q_media_url")
 
         preview_url = _signed_or_raw(st.session_state.get("edit_q_media_url", ""), 300) \
@@ -627,11 +624,10 @@ def admin_add_form_ui():
     st.subheader("הוסף תוכן")
     t = st.selectbox("סוג", ["image","video","audio","text"], key="add_type")
 
-    # ודא שה-key קיים
     if "add_media_url" not in st.session_state:
         st.session_state["add_media_url"] = ""
 
-    # העלאה/תצוגת מדיה (למעט שאלת טקסט)
+    # --- עדכון: מניעת העלאות כפולות במסך הוספה ---
     if t != "text":
         up = st.file_uploader(
             "הוסף קובץ (תמונה/וידאו/אודיו)",
@@ -639,30 +635,28 @@ def admin_add_form_ui():
             key="add_upload"
         )
         if up:
-            saved = _save_uploaded_to_storage(up)
-            st.session_state["add_media_url"] = saved
-            st.success(f"קובץ נשמר: {saved}")
-            st.rerun()  # מרענן כדי שהשדה למטה יראה את ה-URL החדש
+            up_id = (getattr(up, "file_id", None), up.name, getattr(up, "size", None))
+            if st.session_state.get("add_last_upload_id") != up_id:
+                saved = _save_uploaded_to_storage(up)
+                st.session_state["add_media_url"] = saved
+                st.session_state["add_last_upload_id"] = up_id
+                st.success(f"קובץ נשמר: {saved}")
+                st.rerun()
 
-        # שדה URL נשלט ע״י הווידג'ט בלבד (ללא השמה נוספת ל-session_state כאן)
         st.text_input("או הדבק URL", key="add_media_url")
 
-        # תצוגה מקדימה
         signed = _signed_or_raw(st.session_state["add_media_url"], 300) if st.session_state["add_media_url"] else ""
         if signed:
-            if t == "image":
-                st.image(signed, use_container_width=True)
-            elif t == "video":
-                st.video(signed)
-            elif t == "audio":
-                st.audio(signed)
+            if t == "image": st.image(signed, use_container_width=True)
+            elif t == "video": st.video(signed)
+            elif t == "audio": st.audio(signed)
 
-    # שדות שאלה/תשובות
     q_text = st.text_input("טקסט השאלה", key="add_q_text")
+
     st.markdown("**תשובות**")
     cols = st.columns(4)
     a_vals = []
-    for i, c in enumerate(cols):
+    for i,c in enumerate(cols):
         with c:
             a_vals.append(st.text_input(f"תשובה {i+1}", key=f"add_ans_{i}"))
 
@@ -674,7 +668,7 @@ def admin_add_form_ui():
     if st.button("שמור ועדכן"):
         if not q_text or any(not x for x in a_vals):
             st.error("חובה למלא שאלה ו-4 תשובות")
-        elif t != "text" and not st.session_state.get("add_media_url"):
+        elif t!="text" and not st.session_state.get("add_media_url"):
             st.error("לשאלת מדיה חובה לצרף קובץ או URL")
         else:
             try:
@@ -692,10 +686,10 @@ def admin_add_form_ui():
                 all_q.append(new_item)
                 _write_questions(all_q)
                 st.success("נשמר למאגר")
-                st.session_state["admin_screen"] = "menu"
-                st.rerun()
+                st.session_state["admin_screen"]="menu"; st.rerun()
             except Exception:
                 st.error("שמירה נכשלה. בדוק הרשאות/חיבור ל-Supabase ונסה שוב.")
+
 # ניהול ניווט אדמין
 if st.session_state.get("admin_mode"):
     st.divider()
