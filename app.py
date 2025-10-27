@@ -627,35 +627,42 @@ def admin_add_form_ui():
     st.subheader("הוסף תוכן")
     t = st.selectbox("סוג", ["image","video","audio","text"], key="add_type")
 
+    # ודא שה-key קיים
     if "add_media_url" not in st.session_state:
-    st.session_state["add_media_url"] = ""
+        st.session_state["add_media_url"] = ""
 
-if t != "text":
-    up = st.file_uploader(
-        "הוסף קובץ (תמונה/וידאו/אודיו)",
-        type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
-        key="add_upload"
-    )
-    if up:
-        saved = _save_uploaded_to_storage(up)
-        st.session_state["add_media_url"] = saved   # רק להציב
-        st.success(f"קובץ נשמר: {saved}")
-        st.rerun()  # כדי שהטקסטבוקס ירענן את ערכו
+    # העלאה/תצוגת מדיה (למעט שאלת טקסט)
+    if t != "text":
+        up = st.file_uploader(
+            "הוסף קובץ (תמונה/וידאו/אודיו)",
+            type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
+            key="add_upload"
+        )
+        if up:
+            saved = _save_uploaded_to_storage(up)
+            st.session_state["add_media_url"] = saved
+            st.success(f"קובץ נשמר: {saved}")
+            st.rerun()  # מרענן כדי שהשדה למטה יראה את ה-URL החדש
 
-    # שדה ה־URL נשלט רק ע"י הווידג'ט (אין השמה חזרה!)
-    st.text_input("או הדבק URL", key="add_media_url")
+        # שדה URL נשלט ע״י הווידג'ט בלבד (ללא השמה נוספת ל-session_state כאן)
+        st.text_input("או הדבק URL", key="add_media_url")
 
-    signed = _signed_or_raw(st.session_state["add_media_url"], 300) if st.session_state["add_media_url"] else ""
-    if signed:
-        if t == "image": st.image(signed, use_container_width=True)
-        elif t == "video": st.video(signed)
-        elif t == "audio": st.audio(signed)
+        # תצוגה מקדימה
+        signed = _signed_or_raw(st.session_state["add_media_url"], 300) if st.session_state["add_media_url"] else ""
+        if signed:
+            if t == "image":
+                st.image(signed, use_container_width=True)
+            elif t == "video":
+                st.video(signed)
+            elif t == "audio":
+                st.audio(signed)
+
+    # שדות שאלה/תשובות
     q_text = st.text_input("טקסט השאלה", key="add_q_text")
-
     st.markdown("**תשובות**")
     cols = st.columns(4)
     a_vals = []
-    for i,c in enumerate(cols):
+    for i, c in enumerate(cols):
         with c:
             a_vals.append(st.text_input(f"תשובה {i+1}", key=f"add_ans_{i}"))
 
@@ -667,7 +674,7 @@ if t != "text":
     if st.button("שמור ועדכן"):
         if not q_text or any(not x for x in a_vals):
             st.error("חובה למלא שאלה ו-4 תשובות")
-        elif t!="text" and not st.session_state.get("add_media_url"):
+        elif t != "text" and not st.session_state.get("add_media_url"):
             st.error("לשאלת מדיה חובה לצרף קובץ או URL")
         else:
             try:
@@ -685,10 +692,10 @@ if t != "text":
                 all_q.append(new_item)
                 _write_questions(all_q)
                 st.success("נשמר למאגר")
-                st.session_state["admin_screen"]="menu"; st.rerun()
+                st.session_state["admin_screen"] = "menu"
+                st.rerun()
             except Exception:
                 st.error("שמירה נכשלה. בדוק הרשאות/חיבור ל-Supabase ונסה שוב.")
-
 # ניהול ניווט אדמין
 if st.session_state.get("admin_mode"):
     st.divider()
