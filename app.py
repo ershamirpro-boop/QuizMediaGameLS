@@ -592,25 +592,29 @@ def admin_add_form_ui():
     st.subheader("הוסף תוכן")
     t = st.selectbox("סוג", ["image","video","audio","text"], key="add_type")
 
-    # key יחיד כדי למנוע חוסר סנכרון
     if "add_media_url" not in st.session_state:
-        st.session_state["add_media_url"] = ""
+    st.session_state["add_media_url"] = ""
 
-    if t!="text":
-        up = st.file_uploader("הוסף קובץ (תמונה/וידאו/אודיו)", type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"], key="add_upload")
-        if up:
-            saved = _save_uploaded_to_storage(up)
-            st.session_state["add_media_url"] = saved
-            st.success(f"קובץ נשמר: {saved}")
+if t != "text":
+    up = st.file_uploader(
+        "הוסף קובץ (תמונה/וידאו/אודיו)",
+        type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
+        key="add_upload"
+    )
+    if up:
+        saved = _save_uploaded_to_storage(up)
+        st.session_state["add_media_url"] = saved   # רק להציב
+        st.success(f"קובץ נשמר: {saved}")
+        st.rerun()  # כדי שהטקסטבוקס ירענן את ערכו
 
-        st.session_state["add_media_url"] = st.text_input("או הדבק URL", value=st.session_state["add_media_url"], key="add_media_url")
+    # שדה ה־URL נשלט רק ע"י הווידג'ט (אין השמה חזרה!)
+    st.text_input("או הדבק URL", key="add_media_url")
 
-        signed = _signed_or_raw(st.session_state["add_media_url"], 300) if st.session_state["add_media_url"] else ""
-        if signed:
-            if t=="image": st.image(signed, use_container_width=True)
-            elif t=="video": st.video(signed)
-            elif t=="audio": st.audio(signed)
-
+    signed = _signed_or_raw(st.session_state["add_media_url"], 300) if st.session_state["add_media_url"] else ""
+    if signed:
+        if t == "image": st.image(signed, use_container_width=True)
+        elif t == "video": st.video(signed)
+        elif t == "audio": st.audio(signed)
     q_text = st.text_input("טקסט השאלה", key="add_q_text")
 
     st.markdown("**תשובות**")
