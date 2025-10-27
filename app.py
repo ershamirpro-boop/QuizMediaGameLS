@@ -24,20 +24,20 @@ def _supabase_on() -> bool:
 
 # ========================= Flash notifications =========================
 def flash(kind: str, msg: str):
-    """kind: 'success'|'info'|'warning'|'error' — מוצג אחרי rerun הבא"""
+    """kind: 'success'|'info'|'warning'|'error' — יוצג אחרי ה-rerun הבא"""
     st.session_state["_flash"] = {"kind": kind, "msg": msg}
 
 def show_flash():
     data = st.session_state.pop("_flash", None)
-    if not data:
-        return
+    if not data: return
     kind = data.get("kind", "info")
     msg = data.get("msg", "")
     if hasattr(st, "toast"):
         icon = {"success": "✅","info":"ℹ️","warning":"⚠️","error":"❌"}.get(kind, "ℹ️")
         st.toast(msg, icon=icon)
     else:
-        {"success": st.success, "info": st.info, "warning": st.warning, "error": st.error}.get(kind, st.info)(msg)
+        {"success": st.success, "info": st.info,
+         "warning": st.warning, "error": st.error}.get(kind, st.info)(msg)
 
 # ========================= ביצועים והגנות =========================
 st.set_page_config(page_title=APP_TITLE, page_icon="🎯", layout="wide")
@@ -73,9 +73,7 @@ label,p,li,.stMarkdown{text-align:right}
   cursor:pointer; user-select:none; transition:all .12s ease-in-out; direction:rtl;
 }
 .answer-wrap [role="radio"] > div:first-child{ transform:scale(1.15); }
-.answer-wrap [role="radio"] > div:nth-child(2){
-  flex:1; text-align:center; font-size:20px; line-height:1.25;
-}
+.answer-wrap [role="radio"] > div:nth-child(2){ flex:1; text-align:center; font-size:20px; line-height:1.25; }
 .answer-wrap [role="radio"][aria-checked="true"]{
   background:#9ee5ff !important; color:#000 !important; border-color:#0099cc !important;
   box-shadow:0 0 0 3px rgba(0,153,204,.35) inset !important; font-weight:700 !important;
@@ -139,10 +137,7 @@ def sign_url_sb(sb_url: str, expires_seconds: int = 300) -> str:
     return res.get("signedURL") or res.get("signed_url") or ""
 
 def _ensure_jpeg_for_heic(upload) -> tuple[bytes, str, str]:
-    """
-    אם קובץ HEIC/HEIF - ננסה להמיר ל-JPEG (מחזיר bytes, שם קובץ חדש, content_type).
-    אחרת מחזיר bytes המקור, שם מקורי ו-content_type מתאים.
-    """
+    """אם HEIC/HEIF -> המרה ל-JPEG; אחרת מחזיר המקור."""
     name = upload.name
     raw = upload.getbuffer()
     ext = pathlib.Path(name).suffix.lower()
@@ -156,17 +151,13 @@ def _ensure_jpeg_for_heic(upload) -> tuple[bytes, str, str]:
                 pillow_heif.register_heif_opener()
             except Exception:
                 pass
-            im = Image.open(io.BytesIO(raw))
-            im = im.convert("RGB")
+            im = Image.open(io.BytesIO(raw)).convert("RGB")
             out = io.BytesIO()
             im.save(out, format="JPEG", quality=92, optimize=True)
-            jpeg_bytes = out.getvalue()
-            new_name = pathlib.Path(name).with_suffix(".jpg").name
-            return jpeg_bytes, new_name, "image/jpeg"
+            return out.getvalue(), pathlib.Path(name).with_suffix(".jpg").name, "image/jpeg"
         except Exception:
             return bytes(raw), name, content_type
-    else:
-        return bytes(raw), name, content_type
+    return bytes(raw), name, content_type
 
 def _save_uploaded_file_local(upload) -> str:
     file_bytes, name, _ = _ensure_jpeg_for_heic(upload)
@@ -185,8 +176,7 @@ def _upload_bytes_to_supabase(object_path: str, file_bytes: bytes, content_type:
 
 def _save_uploaded_to_storage(upload) -> str:
     """מעלה ל-Supabase אם מוגדר, אחרת לשמירה מקומית. כולל המרת HEIC→JPEG."""
-    if not upload:
-        return ""
+    if not upload: return ""
     file_bytes, fixed_name, content_type = _ensure_jpeg_for_heic(upload)
     if _supabase_on():
         folder = datetime.utcnow().strftime("media/%Y/%m")
@@ -226,14 +216,12 @@ def _read_questions_cached() -> List[Dict[str, Any]]:
     return clean
 
 def _write_questions(all_q: List[Dict[str, Any]]) -> None:
-    """כותב JSON + מנקה cache של הקריאה."""
     payload = json.dumps(all_q, ensure_ascii=False, indent=2).encode("utf-8")
     if _supabase_on():
         sb = _get_supabase(); assert sb is not None
         file_options = {"contentType": "application/json; charset=utf-8", "upsert": "true"}
         with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
-            tmp.write(payload)
-            tmp_path = tmp.name
+            tmp.write(payload); tmp_path = tmp.name
         try:
             sb.storage.from_(SUPABASE_BUCKET).upload(QUESTIONS_OBJECT_PATH, tmp_path, file_options=file_options)
         finally:
@@ -257,8 +245,7 @@ def ensure_game_loaded():
         qs = _read_questions_cached()
         k = min(FIXED_N_QUESTIONS, len(qs))
         chosen = random.sample(qs, k=k) if k>0 else []
-        for q in chosen:
-            random.shuffle(q["answers"])
+        for q in chosen: random.shuffle(q["answers"])
         st.session_state.questions = chosen
         st.session_state.current_idx = 0
         st.session_state.answers_map = {}
@@ -352,10 +339,8 @@ if not st.session_state.get("admin_mode"):
             if q.get("category"):
                 st.caption(f"קטגוריה: {q.get('category')} | קושי: {q.get('difficulty','לא צוין')}")
 
-            # תשובות
             answers_grid(q, idx, key_prefix="quiz")
 
-            # פס תחתון
             st.markdown('<div class="bottom-bar">', unsafe_allow_html=True)
             c_left, c_mid, c_right = st.columns(3)
             with c_left:
@@ -485,6 +470,11 @@ def admin_edit_detail_ui():
         st.session_state["admin_screen"] = "edit_list"
         return
 
+    # איפוס once-flag כשמעבירים לשאלה אחרת
+    if st.session_state.get("_edit_flag_for_qid") != qid:
+        st.session_state["_edit_flag_for_qid"] = qid
+        st.session_state.pop("edit_upload_done", None)
+
     st.subheader("תצוגת שאלה ועריכה")
     _render_media(q, key=f"adm_{qid}")
     st.markdown(f"### {q['question']}")
@@ -518,7 +508,6 @@ def admin_edit_detail_ui():
             new_q["question"]   = st.session_state.get("edit_q_text", q["question"])
             new_q["category"]   = st.session_state.get("edit_q_cat", q.get("category", ""))
             new_q["difficulty"] = st.session_state.get("edit_q_diff", q.get("difficulty", 2))
-
             correct_index_1based = st.session_state.get("edit_correct_idx", 1)
             ci = max(0, min(3, int(correct_index_1based) - 1))
 
@@ -538,14 +527,11 @@ def admin_edit_detail_ui():
                     break
             _write_questions(all_q)
             st.session_state["admin_edit_mode"] = False
-            flash("success", "עדכון בוצע בהצלחה")
-            st.rerun()
+            flash("success", "עדכון בוצע בהצלחה"); st.rerun()
         except Exception:
-            flash("error", "שמירה נכשלה. בדוק הרשאות/חיבור ל-Supabase ונסה שוב.")
-            st.rerun()
+            flash("error", "שמירה נכשלה. בדוק הרשאות/חיבור ל-Supabase ונסה שוב."); st.rerun()
 
-    if colD.button("רענן"):
-        st.rerun()
+    if colD.button("רענן"): st.rerun()
 
     # -------- מצב עריכה --------
     if st.session_state.get("admin_edit_mode", False):
@@ -557,8 +543,7 @@ def admin_edit_detail_ui():
         st.markdown("**תשובות**")
         cols = st.columns(4)
         for i, c in enumerate(cols):
-            with c:
-                st.text_input(f"תשובה {i+1}", value=q["answers"][i]["text"], key=f"edit_ans_{i}")
+            with c: st.text_input(f"תשובה {i+1}", value=q["answers"][i]["text"], key=f"edit_ans_{i}")
 
         correct_idx0 = next((i for i in range(4) if q["answers"][i].get("is_correct")), 0)
         st.radio("סמן נכונה", options=[1, 2, 3, 4], index=correct_idx0, key="edit_correct_idx", horizontal=True)
@@ -572,22 +557,21 @@ def admin_edit_detail_ui():
         if "edit_q_media_url" not in st.session_state:
             st.session_state["edit_q_media_url"] = q.get("content_url","")
 
-        up = st.file_uploader("החלף קובץ (תמונה/וידאו/אודיו)",
-                      type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
-                      key="edit_q_upload")
-
-# מנגנון "פעם אחת"
+        up = st.file_uploader(
+            "החלף קובץ (תמונה/וידאו/אודיו)",
+            type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
+            key="edit_q_upload"
+        )
+        # once-flag למניעת טוסטים בלולאה
         if up is None:
-         st.session_state.pop("edit_upload_done", None)  # איפוס כשמנקים את ה-uploader
+            st.session_state.pop("edit_upload_done", None)
         elif not st.session_state.get("edit_upload_done"):
-         saved = _save_uploaded_to_storage(up)
-         st.session_state["edit_q_media_url"] = saved
-         st.session_state["edit_upload_done"] = True
-         flash("success", "קובץ הוחלף בהצלחה")
-         st.rerun()
+            saved = _save_uploaded_to_storage(up)
+            st.session_state["edit_q_media_url"] = saved
+            st.session_state["edit_upload_done"] = True
+            flash("success", "קובץ הוחלף בהצלחה"); st.rerun()
 
-# שליטה בלעדית של הווידג'ט בערך
-       st.text_input("URL / נתיב", key="edit_q_media_url")
+        st.text_input("URL / נתיב", key="edit_q_media_url")
 
         preview_url = _signed_or_raw(st.session_state.get("edit_q_media_url", ""), 300) \
                       if st.session_state.get("edit_q_media_url") else ""
@@ -620,8 +604,7 @@ def admin_delete_list_ui():
         new_list = [x for x in all_q if x.get("id") not in checked_ids]
         _write_questions(new_list)
         st.session_state["admin_screen"]="menu"
-        flash("success", "תוכן נמחק בהצלחה")
-        st.rerun()
+        flash("success", "תוכן נמחק בהצלחה"); st.rerun()
     if c2.button("רענן"): st.rerun()
     if c3.button("חזרה"): st.session_state["admin_screen"]="menu"; st.rerun()
 
@@ -632,28 +615,28 @@ def admin_add_form_ui():
     if "add_media_url" not in st.session_state:
         st.session_state["add_media_url"] = ""
 
-if t != "text":
-    up = st.file_uploader("הוסף קובץ (תמונה/וידאו/אודיו)",
-                          type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
-                          key="add_upload")
+    if t != "text":
+        up = st.file_uploader(
+            "הוסף קובץ (תמונה/וידאו/אודיו)",
+            type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
+            key="add_upload"
+        )
+        # once-flag למניעת לולאת טוסטים
+        if up is None:
+            st.session_state.pop("add_upload_done", None)
+        elif not st.session_state.get("add_upload_done"):
+            saved = _save_uploaded_to_storage(up)
+            st.session_state["add_media_url"] = saved
+            st.session_state["add_upload_done"] = True
+            flash("success", "קובץ נשמר בהצלחה"); st.rerun()
 
-    # מנגנון "פעם אחת"
-    if up is None:
-        st.session_state.pop("add_upload_done", None)  # איפוס כשמנקים את ה-uploader
-    elif not st.session_state.get("add_upload_done"):
-        saved = _save_uploaded_to_storage(up)
-        st.session_state["add_media_url"] = saved
-        st.session_state["add_upload_done"] = True
-        flash("success", "קובץ נשמר בהצלחה")
-        st.rerun()  # לרענון התצוגה ושדה ה-URL
+        st.text_input("או הדבק URL", key="add_media_url")
 
-    st.text_input("או הדבק URL", key="add_media_url")
-
-    signed = _signed_or_raw(st.session_state["add_media_url"], 300) if st.session_state["add_media_url"] else ""
-    if signed:
-        if t == "image": st.image(signed, use_container_width=True)
-        elif t == "video": st.video(signed)
-        elif t == "audio": st.audio(signed)
+        signed = _signed_or_raw(st.session_state["add_media_url"], 300) if st.session_state["add_media_url"] else ""
+        if signed:
+            if t == "image": st.image(signed, use_container_width=True)
+            elif t == "video": st.video(signed)
+            elif t == "audio": st.audio(signed)
 
     q_text = st.text_input("טקסט השאלה", key="add_q_text")
 
@@ -661,8 +644,7 @@ if t != "text":
     cols = st.columns(4)
     a_vals = []
     for i,c in enumerate(cols):
-        with c:
-            a_vals.append(st.text_input(f"תשובה {i+1}", key=f"add_ans_{i}"))
+        with c: a_vals.append(st.text_input(f"תשובה {i+1}", key=f"add_ans_{i}"))
 
     correct_idx_1based = st.radio("סמן נכונה", options=[1,2,3,4], index=0, horizontal=True, key="add_correct_idx")
     category = st.text_input("קטגוריה (אופציונלי)", value="", key="add_cat")
@@ -690,11 +672,11 @@ if t != "text":
                 all_q.append(new_item)
                 _write_questions(all_q)
                 st.session_state["admin_screen"]="menu"
-                flash("success", "תוכן נוסף בהצלחה")
-                st.rerun()
+                # איפוס דגל ההעלאה למסך הבא
+                st.session_state.pop("add_upload_done", None)
+                flash("success", "תוכן נוסף בהצלחה"); st.rerun()
             except Exception:
-                flash("error", "שמירה נכשלה. בדוק הרשאות/חיבור ל-Supabase ונסה שוב.")
-                st.rerun()
+                flash("error", "שמירה נכשלה. בדוק הרשאות/חיבור ל-Supabase ונסה שוב."); st.rerun()
 
 # ניהול ניווט אדמין
 if st.session_state.get("admin_mode"):
