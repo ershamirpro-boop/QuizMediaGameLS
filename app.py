@@ -134,12 +134,13 @@ label,p,li,.stMarkdown{text-align:right}
   box-shadow:0 0 6px rgba(255,255,255,.15);
 }
 
-/* מצב נבחר - גם מסגרת וגם רקע וגם גופן מודגש */
+/* מצב נבחר - מסגרת מודגשת ורקע תכלת עם טקסט שחור */
 .selected-btn .stButton>button{
-  border:3px solid #ff006e !important;
-  background:rgba(255,0,110,.16) !important;
-  color:#ffffff !important;
+  border:3px solid #0099cc !important;
+  background:#9ee5ff !important;
+  color:#000000 !important;
   font-weight:700 !important;
+  box-shadow:0 0 8px rgba(0,153,204,.4);
 }
 
 /* פס ניווט תחתון */
@@ -173,7 +174,6 @@ img{max-height:52vh;object-fit:contain}
 .video-shell video,.audio-shell audio{width:100%}
 </style>
 """, unsafe_allow_html=True)
-
 # ========================= Utilities =========================
 def reset_admin_state():
     for k in ["admin_mode","admin_screen","admin_edit_mode","admin_edit_qid"]:
