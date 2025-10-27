@@ -133,7 +133,7 @@ label,p,li,.stMarkdown{text-align:right}
   align-items:center;
   gap:10px;
   width:100%;
-  min-height:64px;                    /* קצת יותר גבוה מכבר */
+  min-height:64px;
   padding:12px 14px;
   border:1px solid rgba(0,0,0,.15);
   border-radius:12px;
@@ -153,7 +153,7 @@ label,p,li,.stMarkdown{text-align:right}
 .answer-grid [role="radio"] > div:nth-child(2){
   flex:1;
   text-align:center;
-  font-size:20px;                     /* היה 18px */
+  font-size:20px;
   line-height:1.25;
 }
 
@@ -195,7 +195,7 @@ label,p,li,.stMarkdown{text-align:right}
   background:#ff006b !important;color:#fff !important;border:0 !important
 }
 
-/* מובייל - טור אחד */
+/* מובייל - טור אחד עבור הרדיו */
 @media (max-width:520px){
   .answer-grid [role="radiogroup"]{grid-template-columns:1fr}
 }
@@ -204,6 +204,41 @@ label,p,li,.stMarkdown{text-align:right}
 img{max-height:52vh;object-fit:contain}
 .video-shell,.audio-shell{width:100%}
 .video-shell video,.audio-shell audio{width:100%}
+
+/* ===== תמיכה חלופית: כפתורי st.button בגריד 2x2 עם הדגשה ===== */
+/* אם אתה משתמש בכפתורים במקום רדיו, עטוף אותם ב<div class="answer-grid"> */
+.answer-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+.answer-grid .stButton{margin:0;}
+.answer-grid .stButton>button{
+  width:100%;
+  padding:14px 16px;
+  font-size:18px;
+  border-radius:12px;
+  min-height:56px;
+  transition:all .12s ease-in-out;
+  border:1px solid rgba(0,0,0,.15);
+  background:rgba(255,255,255,.03);
+}
+/* ריחוף */
+.answer-grid .stButton>button:hover{
+  box-shadow:0 0 0 2px rgba(0,0,0,.06) inset;
+}
+/* נבחר - כשמשתמשים type="primary" בפייתון */
+.answer-grid .stButton>button[data-testid="baseButton-primary"]{
+  background:#9ee5ff !important;
+  color:#000000 !important;
+  border-color:#0099cc !important;
+  box-shadow:0 0 0 3px rgba(0,153,204,.35) inset !important;
+  font-weight:700 !important;
+}
+/* מובייל - טור אחד גם לכפתורים */
+@media (max-width:520px){
+  .answer-grid{grid-template-columns:1fr}
+}
 </style>
 """, unsafe_allow_html=True)
 
