@@ -274,17 +274,26 @@ def _render_media(q: Dict[str, Any], key: str):
 # ========================= תשובות כ"רדיו-כפתורים" =========================
 def answers_grid(question: Dict[str, Any], q_index: int, key_prefix: str):
     opts = [a["text"] for a in question["answers"]]
-    current = st.session_state.answers_map.get(q_index, None)
+    wkey = f"{key_prefix}_radio_{q_index}"
+
+    # אם כבר יש תשובה שמורה – קבע אותה כערך הווידג'ט לפני הציור
+    saved = st.session_state.get("answers_map", {}).get(q_index)
+    if (saved is not None) and (wkey not in st.session_state):
+        st.session_state[wkey] = saved  # זה יהיה ה-default, ואין צורך ב-index
+
     st.markdown('<div class="answer-wrap">', unsafe_allow_html=True)
+    # אל תעביר index בכלל. אם אין ערך ב-session_state, נבקש שלא יהיה סימון (index=None)
     picked = st.radio(
         label="בחר תשובה",
         options=opts,
-        index=(opts.index(current) if current in opts else None),
-        key=f"{key_prefix}_radio_{q_index}",
+        key=wkey,
+        index=None,                 # רק כדי לא לבחור אוטומטית אופציה 1 בפעם הראשונה
         label_visibility="collapsed",
     )
     st.markdown('</div>', unsafe_allow_html=True)
-    if picked is not None and picked != current:
+
+    # סנכרון מיידי למפה – אין תנאי, זה מקור האמת
+    if picked is not None:
         st.session_state.answers_map[q_index] = picked
 
 # ========================= Header =========================
