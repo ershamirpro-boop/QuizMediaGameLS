@@ -573,16 +573,21 @@ def admin_edit_detail_ui():
             st.session_state["edit_q_media_url"] = q.get("content_url","")
 
         up = st.file_uploader("החלף קובץ (תמונה/וידאו/אודיו)",
-                              type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
-                              key="edit_q_upload")
-        if up:
-            saved = _save_uploaded_to_storage(up)
-            st.session_state["edit_q_media_url"] = saved
-            flash("success", "קובץ הוחלף בהצלחה")
-            st.rerun()
+                      type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
+                      key="edit_q_upload")
 
-        # שליטה בלעדית של הווידג'ט בערך
-        st.text_input("URL / נתיב", key="edit_q_media_url")
+# מנגנון "פעם אחת"
+        if up is None:
+         st.session_state.pop("edit_upload_done", None)  # איפוס כשמנקים את ה-uploader
+        elif not st.session_state.get("edit_upload_done"):
+         saved = _save_uploaded_to_storage(up)
+         st.session_state["edit_q_media_url"] = saved
+         st.session_state["edit_upload_done"] = True
+         flash("success", "קובץ הוחלף בהצלחה")
+         st.rerun()
+
+# שליטה בלעדית של הווידג'ט בערך
+       st.text_input("URL / נתיב", key="edit_q_media_url")
 
         preview_url = _signed_or_raw(st.session_state.get("edit_q_media_url", ""), 300) \
                       if st.session_state.get("edit_q_media_url") else ""
