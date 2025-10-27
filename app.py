@@ -352,15 +352,15 @@ if not st.session_state.get("admin_mode"):
 
         cols = st.columns(2)
         with cols[0]:
-            if st.button("← הקודמת", disabled=(ridx==0)):
+            if st.button("הקודם", disabled=(ridx==0)):
                 st.session_state.review_idx -= 1; st.rerun()
         with cols[1]:
-            if st.button("הבאה →", disabled=(ridx==len(qlist)-1)):
+            if st.button("הבא", disabled=(ridx==len(qlist)-1)):
                 st.session_state.review_idx += 1; st.rerun()
 
         st.divider()
         st.markdown('<div class="primary-cta">', unsafe_allow_html=True)
-        submit_clicked = st.button("בדוק אותי 💥", key="check_exam_big")
+        submit_clicked = st.button("💥בדוק אותי ", key="check_exam_big")
         st.markdown('</div>', unsafe_allow_html=True)
 
         if submit_clicked:
