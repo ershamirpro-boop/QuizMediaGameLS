@@ -119,28 +119,44 @@ label,p,li,.stMarkdown{text-align:right}
   background:#23C483!important;color:#fff!important;border:0!important
 }
 
-/* ===== אזור תשובות כגריד 2x2 ===== */
-.answer-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+/* גריד 2x2 לרדיו כדי להיראות כמו כפתורים */
+.answer-grid [role="radiogroup"]{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
 
-/* בסיס לכפתורי תשובות */
-.choice-btn .stButton>button{
-  width:100%;padding:14px 16px;font-size:18px;border-radius:12px;
-  border:1px solid rgba(200,200,200,.35);
-  background:rgba(255,255,255,.03);
-  transition:all .12s ease-in-out;
+/* בסיס לאפשרויות - נראות ככפתורים */
+.answer-grid [role="radio"]{
+  border:1px solid rgba(0,0,0,.15);
+  border-radius:12px;
+  padding:12px 14px;
   min-height:56px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;
+  cursor:pointer;user-select:none;
+  transition:all .12s ease-in-out;
+  background:rgba(255,255,255,.03);
 }
-.choice-btn .stButton>button:hover{
-  box-shadow:0 0 6px rgba(255,255,255,.15);
+/* מסתיר את העיגול הפנימי של הרדיו */
+.answer-grid [role="radio"] > div:first-child{
+  display:none !important;
 }
-
-/* מצב נבחר - מסגרת מודגשת ורקע תכלת עם טקסט שחור */
-.selected-btn .stButton>button{
-  border:3px solid #0099cc !important;
+/* מצב נבחר - תכלת בולט, טקסט שחור, מסגרת מודגשת */
+.answer-grid [role="radio"][aria-checked="true"]{
   background:#9ee5ff !important;
   color:#000000 !important;
+  border-color:#0099cc !important;
+  box-shadow:0 0 0 3px rgba(0,153,204,.35) inset !important;
   font-weight:700 !important;
-  box-shadow:0 0 8px rgba(0,153,204,.4);
+}
+/* ריחוף ופוקוס */
+.answer-grid [role="radio"]:hover{
+  box-shadow:0 0 0 2px rgba(0,0,0,.06) inset;
+}
+.answer-grid [role="radio"]:focus-visible{
+  outline:3px solid rgba(59,130,246,.55);
+  outline-offset:2px;
 }
 
 /* פס ניווט תחתון */
@@ -165,7 +181,7 @@ label,p,li,.stMarkdown{text-align:right}
 
 /* מובייל - טור אחד */
 @media (max-width:520px){
-  .answer-grid{grid-template-columns:1fr}
+  .answer-grid [role="radiogroup"]{grid-template-columns:1fr}
 }
 
 /* מדיה */
@@ -174,6 +190,7 @@ img{max-height:52vh;object-fit:contain}
 .video-shell video,.audio-shell audio{width:100%}
 </style>
 """, unsafe_allow_html=True)
+
 # ========================= Utilities =========================
 def reset_admin_state():
     for k in ["admin_mode","admin_screen","admin_edit_mode","admin_edit_qid"]:
@@ -215,57 +232,23 @@ def _render_media(q: Dict[str, Any], key: str):
     elif t=="video": st.video(signed)
     elif t=="audio": st.audio(signed)
 
-# ========================= כפתורי תשובות עם הדגשה =========================
-def choice_button(label: str, q_index: int, btn_idx: int) -> bool:
-    """
-    כפתור תשובה שנראה כמו כפתור רגיל של Streamlit,
-    ואם נבחר – יקבל רקע תכלת, טקסט שחור, מסגרת מודגשת וגופן מודגש.
-    """
-    # תשובה שנבחרה כבר מה-session state
-    picked = st.session_state.answers_map.get(q_index)
-    is_selected = (picked == label)
+# ========================= תשובות כ"רדיו-כפתורים" =========================
+def answers_grid(question: Dict[str, Any], q_index: int, key_prefix: str):
+    opts = [a["text"] for a in question["answers"]]
+    current = st.session_state.answers_map.get(q_index, None)
 
-    # מזהה עוגן לכל כפתור
-    anchor_id = f"choice_{q_index}_{btn_idx}"
-    wrapper_class = "choice-btn selected-btn" if is_selected else "choice-btn"
-
-    # מגדירים div לפני הכפתור כדי שנוכל ליישם עליו CSS דינמי
-    st.markdown(f"<div class='{wrapper_class}' id='{anchor_id}'></div>", unsafe_allow_html=True)
-
-    # הכפתור עצמו
-    clicked = st.button(label, key=f"btn_{q_index}_{btn_idx}", use_container_width=True)
-
-    # אם הכפתור נבחר – מוודאים שהכפתור שאחרי העוגן מקבל את העיצוב
-    if is_selected:
-        st.markdown(f"""
-        <style>
-        div#{anchor_id} + div button {{
-            border:3px solid #0099cc !important;
-            background:#9ee5ff !important;
-            color:#000000 !important;
-            font-weight:700 !important;
-            box-shadow:0 0 8px rgba(0,153,204,0.4);
-        }}
-        </style>
-        """, unsafe_allow_html=True)
-
-    return clicked
-    return clicked
-
-def render_answer_buttons(question: Dict[str, Any], q_index: int):
     st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        for i in [0, 2]:
-            if choice_button(question["answers"][i]["text"], q_index, i):
-                st.session_state.answers_map[q_index] = question["answers"][i]["text"]
-                st.rerun()
-    with col2:
-        for i in [1, 3]:
-            if choice_button(question["answers"][i]["text"], q_index, i):
-                st.session_state.answers_map[q_index] = question["answers"][i]["text"]
-                st.rerun()
+    picked = st.radio(
+        label="בחר תשובה",
+        options=opts,
+        index=opts.index(current) if current in opts else None,
+        key=f"{key_prefix}_radio_{q_index}",
+        label_visibility="collapsed",
+    )
     st.markdown('</div>', unsafe_allow_html=True)
+
+    if picked is not None and picked != current:
+        st.session_state.answers_map[q_index] = picked
 
 # ========================= Header =========================
 st.title("🎯 משחק טריוויה מדיה")
@@ -316,8 +299,8 @@ if not st.session_state.get("admin_mode"):
             if q.get("category"):
                 st.caption(f"קטגוריה: {q.get('category')} | קושי: {q.get('difficulty','לא צוין')}")
 
-            # תשובות ככפתורים עם הדגשה
-            render_answer_buttons(q, idx)
+            # תשובות כ"רדיו-כפתורים" עם הדגשה
+            answers_grid(q, idx, key_prefix="quiz")
 
             # פס תחתון: אחורה + שמור בחירה והמשך + אפס משחק
             st.markdown('<div class="bottom-bar">', unsafe_allow_html=True)
@@ -348,8 +331,8 @@ if not st.session_state.get("admin_mode"):
         _render_media(q, key=f"rev{ridx}")
         st.markdown(f"**{q['question']}**")
 
-        # תשובות ככפתורים עם הדגשה
-        render_answer_buttons(q, ridx)
+        # תשובות כ"רדיו-כפתורים" עם הדגשה
+        answers_grid(q, ridx, key_prefix="review")
 
         cols = st.columns(2)
         with cols[0]:
