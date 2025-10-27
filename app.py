@@ -108,41 +108,50 @@ def _read_questions() -> List[Dict[str, Any]]:
 st.set_page_config(page_title=APP_TITLE, page_icon="🎯", layout="wide")
 st.markdown("""
 <style>
-.stApp{direction:rtl}
-.block-container{padding-top:10px;padding-bottom:16px;max-width:900px}
-h1,h2,h3,h4{text-align:right;letter-spacing:.2px}
-label,p,li,.stMarkdown{text-align:right}
-
-/* כפתור התחל */
-.start-btn>button{
-  width:100%;padding:14px 16px;font-size:18px;border-radius:12px;
-  background:#23C483!important;color:#fff!important;border:0!important
-}
-
-/* גריד 2x2 לרדיו כדי להיראות כמו כפתורים */
+/* גריד 2x2 לאפשרויות */
 .answer-grid [role="radiogroup"]{
   display:grid;
   grid-template-columns:1fr 1fr;
   gap:10px;
 }
 
-/* בסיס לאפשרויות - נראות ככפתורים */
+/* כל אפשרות היא כפתור אחד עם הנקודה בפנים בצד ימין */
 .answer-grid [role="radio"]{
+  display:flex;
+  flex-direction:row-reverse;          /* RTL - הנקודה תופיע מימין */
+  align-items:center;
+  gap:10px;
+  width:100%;
+  min-height:64px;
+  padding:12px 14px;
   border:1px solid rgba(0,0,0,.15);
   border-radius:12px;
-  padding:12px 14px;
-  min-height:56px;
-  display:flex;align-items:center;justify-content:center;
-  font-size:18px;
-  cursor:pointer;user-select:none;
-  transition:all .12s ease-in-out;
   background:rgba(255,255,255,.03);
+  cursor:pointer; user-select:none;
+  transition:all .12s ease-in-out;
+  box-sizing:border-box;
+  direction:rtl;
 }
-/* מסתיר את העיגול הפנימי של הרדיו */
+
+/* מגדיל מעט את "הנקודה" של הרדיו */
 .answer-grid [role="radio"] > div:first-child{
-  display:none !important;
+  transform:scale(1.15);
 }
-/* מצב נבחר - תכלת בולט, טקסט שחור, מסגרת מודגשת */
+
+/* הטקסט - במרכז בתוך הכפתור */
+.answer-grid [role="radio"] > div:nth-child(2){
+  flex:1;
+  text-align:center;
+  font-size:20px;
+  line-height:1.25;
+}
+
+/* ריחוף */
+.answer-grid [role="radio"]:hover{
+  box-shadow:0 0 0 2px rgba(0,0,0,.06) inset;
+}
+
+/* מצב נבחר - תכלת בולט, טקסט שחור ומודגש */
 .answer-grid [role="radio"][aria-checked="true"]{
   background:#9ee5ff !important;
   color:#000000 !important;
@@ -150,44 +159,17 @@ label,p,li,.stMarkdown{text-align:right}
   box-shadow:0 0 0 3px rgba(0,153,204,.35) inset !important;
   font-weight:700 !important;
 }
-/* ריחוף ופוקוס */
-.answer-grid [role="radio"]:hover{
-  box-shadow:0 0 0 2px rgba(0,0,0,.06) inset;
-}
+
+/* פוקוס נגישות */
 .answer-grid [role="radio"]:focus-visible{
   outline:3px solid rgba(59,130,246,.55);
   outline-offset:2px;
-}
-
-/* פס ניווט תחתון */
-.bottom-bar{
-  position:sticky;bottom:0;background:rgba(255,255,255,.94);
-  backdrop-filter:blur(6px);padding:10px 8px;border-top:1px solid rgba(0,0,0,.08)
-}
-@media (prefers-color-scheme: dark){
-  .bottom-bar{background:rgba(17,24,39,.9);border-top:1px solid rgba(255,255,255,.08)}
-}
-
-/* כפתורים בסקירה/סיכום */
-.summary-btns .stButton button{width:100%;padding:12px 16px;font-size:16px;border-radius:10px}
-.badge-ok{background:#E8FFF3;border:1px solid #23C483;color:#0b7a56;padding:6px 10px;border-radius:10px;font-size:14px}
-.badge-err{background:#FFF0F0;border:1px solid #F44336;color:#a02121;padding:6px 10px;border-radius:10px;font-size:14px}
-
-/* CTA גדול ל"בדוק אותי" */
-.primary-cta .stButton>button{
-  width:100%;padding:16px 18px;font-size:20px;border-radius:12px;
-  background:#ff006b !important;color:#fff !important;border:0 !important
 }
 
 /* מובייל - טור אחד */
 @media (max-width:520px){
   .answer-grid [role="radiogroup"]{grid-template-columns:1fr}
 }
-
-/* מדיה */
-img{max-height:52vh;object-fit:contain}
-.video-shell,.audio-shell{width:100%}
-.video-shell video,.audio-shell audio{width:100%}
 </style>
 """, unsafe_allow_html=True)
 
