@@ -217,28 +217,39 @@ def _render_media(q: Dict[str, Any], key: str):
 
 # ========================= כפתורי תשובות עם הדגשה =========================
 def choice_button(label: str, q_index: int, btn_idx: int) -> bool:
+    """
+    כפתור תשובה שנראה כמו כפתור רגיל של Streamlit,
+    ואם נבחר – יקבל רקע תכלת, טקסט שחור, מסגרת מודגשת וגופן מודגש.
+    """
+    # תשובה שנבחרה כבר מה-session state
     picked = st.session_state.answers_map.get(q_index)
     is_selected = (picked == label)
+
+    # מזהה עוגן לכל כפתור
     anchor_id = f"choice_{q_index}_{btn_idx}"
     wrapper_class = "choice-btn selected-btn" if is_selected else "choice-btn"
 
-    # עוגן וקלאס מסביב לכפתור
+    # מגדירים div לפני הכפתור כדי שנוכל ליישם עליו CSS דינמי
     st.markdown(f"<div class='{wrapper_class}' id='{anchor_id}'></div>", unsafe_allow_html=True)
+
+    # הכפתור עצמו
     clicked = st.button(label, key=f"btn_{q_index}_{btn_idx}", use_container_width=True)
 
+    # אם הכפתור נבחר – מוודאים שהכפתור שאחרי העוגן מקבל את העיצוב
     if is_selected:
         st.markdown(f"""
         <style>
-        /* מבטיח שהכפתור שאחרי העוגן יהיה מודגש גם אם Streamlit עוטף בעוד divים */
         div#{anchor_id} + div button {{
-            border:3px solid #ff006e !important;
-            background:rgba(255,0,110,.16) !important;
-            color:#ffffff !important;
+            border:3px solid #0099cc !important;
+            background:#9ee5ff !important;
+            color:#000000 !important;
             font-weight:700 !important;
+            box-shadow:0 0 8px rgba(0,153,204,0.4);
         }}
         </style>
         """, unsafe_allow_html=True)
 
+    return clicked
     return clicked
 
 def render_answer_buttons(question: Dict[str, Any], q_index: int):
