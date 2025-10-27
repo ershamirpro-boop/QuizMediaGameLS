@@ -469,7 +469,9 @@ def admin_edit_detail_ui():
     qid = st.session_state.get("admin_edit_qid")
     q = _get_question_by_id(qid)
     if not q:
-        st.error("השאלה לא נמצאה"); st.session_state["admin_screen"]="edit_list"; return
+        st.error("השאלה לא נמצאה")
+        st.session_state["admin_screen"] = "edit_list"
+        return
 
     st.subheader("תצוגת שאלה ועריכה")
     _render_media(q, key=f"adm_{qid}")
@@ -478,27 +480,38 @@ def admin_edit_detail_ui():
 
     col1, col2 = st.columns(2)
     ans = q["answers"]
+
     def chip(label: str, ok: bool):
         css = "badge-ok" if ok else "badge-err"
-        st.markdown(f"<div class='{css}' style='margin-bottom:8px'>{html.escape(label)}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='{css}' style='margin-bottom:8px'>{html.escape(label)}</div>",
+            unsafe_allow_html=True
+        )
+
     with col1:
-        for a in ans[::2]: chip(a["text"], a.get("is_correct",False))
+        for a in ans[::2]:
+            chip(a["text"], a.get("is_correct", False))
     with col2:
-        for a in ans[1::2]: chip(a["text"], a.get("is_correct",False))
+        for a in ans[1::2]:
+            chip(a["text"], a.get("is_correct", False))
 
     st.divider()
     colA, colB, colC, colD = st.columns(4)
     if colA.button("ערוך"):
-        st.session_state["admin_edit_mode"] = True; st.rerun()
+        st.session_state["admin_edit_mode"] = True
+        st.rerun()
+
     if colB.button("חזרה"):
-        st.session_state["admin_screen"]="edit_list"; st.session_state.pop("admin_edit_mode", None); st.rerun()
+        st.session_state["admin_screen"] = "edit_list"
+        st.session_state.pop("admin_edit_mode", None)
+        st.rerun()
 
     if colC.button("שמור", disabled=not st.session_state.get("admin_edit_mode", False)):
         try:
             new_q = dict(q)
             new_q["question"]   = st.session_state.get("edit_q_text", q["question"])
-            new_q["category"]   = st.session_state.get("edit_q_cat", q.get("category",""))
-            new_q["difficulty"] = st.session_state.get("edit_q_diff", q.get("difficulty",2))
+            new_q["category"]   = st.session_state.get("edit_q_cat", q.get("category", ""))
+            new_q["difficulty"] = st.session_state.get("edit_q_diff", q.get("difficulty", 2))
 
             correct_index_1based = st.session_state.get("edit_correct_idx", 1)
             ci = max(0, min(3, int(correct_index_1based) - 1))
@@ -509,59 +522,81 @@ def admin_edit_detail_ui():
                 new_answers.append({"text": txt, "is_correct": (ci == i)})
             new_q["answers"] = new_answers
 
-            new_q["type"] = st.session_state.get("edit_q_type", q.get("type","text"))
-            new_q["content_url"] = st.session_state.get("edit_q_media_url", q.get("content_url",""))
+            new_q["type"] = st.session_state.get("edit_q_type", q.get("type", "text"))
+            new_q["content_url"] = st.session_state.get("edit_q_media_url", q.get("content_url", ""))
 
             all_q = _read_questions_cached()
-            for i,row in enumerate(all_q):
-                if row.get("id")==qid: all_q[i]=new_q; break
+            for i, row in enumerate(all_q):
+                if row.get("id") == qid:
+                    all_q[i] = new_q
+                    break
             _write_questions(all_q)
             st.success("עודכן ושמור")
             st.session_state["admin_edit_mode"] = False
             st.rerun()
-        except Exception as e:
+        except Exception:
             st.error("שמירה נכשלה. בדוק הרשאות/חיבור ל-Supabase ונסה שוב.")
 
-    if colD.button("רענן"): st.rerun()
+    if colD.button("רענן"):
+        st.rerun()
 
+    # -------- מצב עריכה --------
     if st.session_state.get("admin_edit_mode", False):
         st.markdown("### מצב עריכה")
         st.text_input("מלל השאלה", value=q["question"], key="edit_q_text")
-        st.text_input("קטגוריה", value=q.get("category",""), key="edit_q_cat")
-        st.number_input("קושי", min_value=1, max_value=5, value=int(q.get("difficulty",2)), key="edit_q_diff")
+        st.text_input("קטגוריה", value=q.get("category", ""), key="edit_q_cat")
+        st.number_input("קושי", min_value=1, max_value=5, value=int(q.get("difficulty", 2)), key="edit_q_diff")
 
         st.markdown("**תשובות**")
         cols = st.columns(4)
-        for i,c in enumerate(cols):
+        for i, c in enumerate(cols):
             with c:
                 st.text_input(f"תשובה {i+1}", value=q["answers"][i]["text"], key=f"edit_ans_{i}")
 
         correct_idx0 = next((i for i in range(4) if q["answers"][i].get("is_correct")), 0)
-        st.radio("סמן נכונה", options=[1,2,3,4], index=correct_idx0, key="edit_correct_idx", horizontal=True)
+        st.radio("סמן נכונה", options=[1, 2, 3, 4], index=correct_idx0, key="edit_correct_idx", horizontal=True)
 
         st.divider()
         st.markdown("**מדיה**")
-        t = q.get("type","text")
-        st.selectbox("סוג", ["image","video","audio","text"],
-                     index=["image","video","audio","text"].index(t), key="edit_q_type")
+        t = q.get("type", "text")
+        st.selectbox(
+            "סוג",
+            ["image", "video", "audio", "text"],
+            index=["image", "video", "audio", "text"].index(t),
+            key="edit_q_type"
+        )
 
+        # דואגים שה-key קיים לפני יצירת הווידג'ט
         if "edit_q_media_url" not in st.session_state:
-            st.session_state["edit_q_media_url"] = q.get("content_url","")
+            st.session_state["edit_q_media_url"] = q.get("content_url", "")
 
-        up = st.file_uploader("החלף קובץ (תמונה/וידאו/אודיו)", type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"], key="edit_q_upload")
+        up = st.file_uploader(
+            "החלף קובץ (תמונה/וידאו/אודיו)",
+            type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
+            key="edit_q_upload"
+        )
         if up:
             saved = _save_uploaded_to_storage(up)
-            st.session_state["edit_q_media_url"] = saved
-            st.success(f"קובץ הוחלף ונשמר: {saved}")
+            st.session_state["edit_q_media_url"] = saved  # מעדכן את ה-URL החדש
+            st.success(f"קובץ הועלה: {saved}")
+            st.rerun()  # רענון כדי שה-text_input יציג את הערך החדש
 
-        st.session_state["edit_q_media_url"] = st.text_input("URL / נתיב", value=st.session_state["edit_q_media_url"], key="edit_q_media_url")
+        # הווידג'ט שולט בערך (אין השמה חזרה ל-session_state בשורה הזו!)
+        if st.session_state.get("edit_q_media_url", ""):
+            st.text_input("URL / נתיב", key="edit_q_media_url")
+        else:
+            # בפעם הראשונה בלבד אפשר לתת value – אם ה-key בדיוק נוצר קודם
+            st.text_input("URL / נתיב", value=q.get("content_url",""), key="edit_q_media_url")
 
-        preview_url = _signed_or_raw(st.session_state["edit_q_media_url"], 300) if st.session_state["edit_q_media_url"] else ""
-        if st.session_state.get("edit_q_type", t) == "image" and preview_url:
+        preview_url = _signed_or_raw(st.session_state.get("edit_q_media_url", ""), 300) \
+                      if st.session_state.get("edit_q_media_url") else ""
+
+        current_type = st.session_state.get("edit_q_type", t)
+        if current_type == "image" and preview_url:
             st.image(preview_url, use_container_width=True)
-        elif st.session_state.get("edit_q_type", t) == "video" and preview_url:
+        elif current_type == "video" and preview_url:
             st.video(preview_url)
-        elif st.session_state.get("edit_q_type", t) == "audio" and preview_url:
+        elif current_type == "audio" and preview_url:
             st.audio(preview_url)
 
 def admin_delete_list_ui():
