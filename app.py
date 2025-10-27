@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, json, random, uuid, pathlib, html, mimetypes
+import os, json, random, uuid, pathlib, html, mimetypes, io
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import streamlit as st
@@ -20,8 +20,67 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "")
 QUESTIONS_OBJECT_PATH = os.getenv("QUESTIONS_OBJECT_PATH", "data/questions.json")
 
+# סוגי קבצים להעלאה
+IMAGE_TYPES = ["jpg","jpeg","png","gif","heic","heif"]
+VIDEO_TYPES = ["mp4","mov","webm"]
+AUDIO_TYPES = ["m4a","mp3","wav","ogg"]
+ALL_MEDIA_TYPES = IMAGE_TYPES + VIDEO_TYPES + AUDIO_TYPES
+
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+
+# ========================= ניסיונות טעינת ממירי HEIC =========================
+_HAVE_PILLOW_HEIF = False
+_HAVE_PYHEIF = False
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    _HAVE_PILLOW_HEIF = True
+except Exception:
+    pass
+
+try:
+    import pyheif
+    from PIL import Image  # נשתמש גם כאן אם צריך
+    _HAVE_PYHEIF = True
+except Exception:
+    try:
+        from PIL import Image
+    except Exception:
+        Image = None
+
+def _looks_like_heic(name: str) -> bool:
+    ext = pathlib.Path(name).suffix.lower().lstrip(".")
+    return ext in ("heic","heif")
+
+def _heic_to_jpeg_bytes(file_bytes: bytes) -> Optional[bytes]:
+    """
+    מחזיר bytes של JPEG אם המרה הצליחה, אחרת None.
+    קודם מנסה pillow_heif דרך Pillow.open, אם לא – מנסה pyheif.
+    """
+    # דרך pillow-heif
+    if _HAVE_PILLOW_HEIF and Image is not None:
+        try:
+            im = Image.open(io.BytesIO(file_bytes))
+            out = io.BytesIO()
+            im.save(out, format="JPEG", quality=90, optimize=True)
+            return out.getvalue()
+        except Exception:
+            pass
+    # דרך pyheif
+    if _HAVE_PYHEIF and Image is not None:
+        try:
+            heif_file = pyheif.read_heif(file_bytes)
+            im = Image.frombytes(
+                heif_file.mode, heif_file.size, heif_file.data, "raw",
+                heif_file.mode, heif_file.stride
+            )
+            out = io.BytesIO()
+            im.save(out, format="JPEG", quality=90, optimize=True)
+            return out.getvalue()
+        except Exception:
+            pass
+    return None
 
 # ========================= Supabase עזרי אחסון =========================
 _supabase = None
@@ -41,9 +100,9 @@ def _sb_upload_bytes(object_path: str, data: bytes, content_type: str = "applica
     sb.storage.from_(SUPABASE_BUCKET).upload(object_path, data, file_options=file_options)
     return f"sb://{SUPABASE_BUCKET}/{object_path}"
 
-def upload_to_supabase(file_bytes: bytes, filename: str) -> str:
+def upload_to_supabase(file_bytes: bytes, filename: str, content_type_hint: Optional[str] = None) -> str:
     ext = pathlib.Path(filename).suffix.lower()
-    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    content_type = content_type_hint or mimetypes.guess_type(filename)[0] or "application/octet-stream"
     folder = datetime.utcnow().strftime("media/%Y/%m")
     object_path = f"{folder}/{uuid.uuid4().hex}{ext}"
     return _sb_upload_bytes(object_path, file_bytes, content_type)
@@ -55,17 +114,39 @@ def sign_url_sb(sb_url: str, expires_seconds: int = 300) -> str:
     res = sb.storage.from_(bucket).create_signed_url(path, expires_seconds)
     return res.get("signedURL") or res.get("signed_url") or ""
 
-def _save_uploaded_file_local(upload) -> str:
-    ext = pathlib.Path(upload.name).suffix.lower()
-    name = f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex}{ext}"
+def _save_uploaded_file_local_bytes(file_bytes: bytes, suffix: str) -> str:
+    name = f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex}{suffix}"
     path = MEDIA_DIR / name
     with open(path, "wb") as f:
-        f.write(upload.getbuffer())
-    return str(path).replace("\\", "/")
+        f.write(file_bytes)
+    return str(path).replace("\\","/")
+
+def _save_uploaded_file_local(upload) -> str:
+    # fallback - לא משתמשים בו כשיודעים להמיר
+    ext = pathlib.Path(upload.name).suffix.lower()
+    return _save_uploaded_file_local_bytes(upload.getbuffer(), ext)
 
 def _save_uploaded_to_storage(upload) -> str:
+    """
+    אם HEIC/HEIF - המרה ל-JPEG ושמירה/העלאה רק של ה-JPEG.
+    אחרת - שומר כמו שהוא.
+    """
+    raw_bytes = upload.getbuffer()
+    filename = upload.name
+    if _looks_like_heic(filename):
+        jpeg_bytes = _heic_to_jpeg_bytes(raw_bytes)
+        if jpeg_bytes is not None:
+            new_name = pathlib.Path(filename).with_suffix(".jpg").name
+            if _supabase_on():
+                return upload_to_supabase(jpeg_bytes, new_name, content_type_hint="image/jpeg")
+            else:
+                return _save_uploaded_file_local_bytes(jpeg_bytes, ".jpg")
+        else:
+            st.warning("לא הצלחתי להמיר HEIC ל-JPEG. אשמור את הקובץ המקורי כפי שהוא.")
+            # ממשיך לשמירה כמות שהוא
+    # קובץ רגיל
     if _supabase_on():
-        return upload_to_supabase(upload.getbuffer(), upload.name)
+        return upload_to_supabase(raw_bytes, filename)
     return _save_uploaded_file_local(upload)
 
 def _signed_or_raw(url: str, seconds: int = 300) -> str:
@@ -129,7 +210,7 @@ label,p,li,.stMarkdown{text-align:right}
 /* בסיס לאפשרויות - כפתור עם נקודת רדיו בפנים (ימין) וטקסט במרכז */
 .answer-grid [role="radio"]{
   display:flex;
-  flex-direction:row-reverse;        /* הנקודה מצד ימין ב-RTL */
+  flex-direction:row-reverse;
   align-items:center;
   gap:10px;
   width:100%;
@@ -205,8 +286,7 @@ img{max-height:52vh;object-fit:contain}
 .video-shell,.audio-shell{width:100%}
 .video-shell video,.audio-shell audio{width:100%}
 
-/* ===== תמיכה חלופית: כפתורי st.button בגריד 2x2 עם הדגשה ===== */
-/* אם אתה משתמש בכפתורים במקום רדיו, עטוף אותם ב<div class="answer-grid"> */
+/* ===== אופציונלי: תמיכה גם בכפתורי st.button ב-2x2 ===== */
 .answer-grid{
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -223,11 +303,9 @@ img{max-height:52vh;object-fit:contain}
   border:1px solid rgba(0,0,0,.15);
   background:rgba(255,255,255,.03);
 }
-/* ריחוף */
 .answer-grid .stButton>button:hover{
   box-shadow:0 0 0 2px rgba(0,0,0,.06) inset;
 }
-/* נבחר - כשמשתמשים type="primary" בפייתון */
 .answer-grid .stButton>button[data-testid="baseButton-primary"]{
   background:#9ee5ff !important;
   color:#000000 !important;
@@ -235,7 +313,6 @@ img{max-height:52vh;object-fit:contain}
   box-shadow:0 0 0 3px rgba(0,153,204,.35) inset !important;
   font-weight:700 !important;
 }
-/* מובייל - טור אחד גם לכפתורים */
 @media (max-width:520px){
   .answer-grid{grid-template-columns:1fr}
 }
@@ -535,21 +612,15 @@ def admin_edit_detail_ui():
         st.text_input("קטגוריה", value=q.get("category",""), key="edit_q_cat")
         st.number_input("קושי", min_value=1, max_value=5, value=int(q.get("difficulty",2)), key="edit_q_diff")
 
-        st.markdown("**תשובות**")
-        cols = st.columns(4)
-        for i,c in enumerate(cols):
-            with c:
-                st.text_input(f"תשובה {i+1}", value=q["answers"][i]["text"], key=f"edit_ans_{i}")
-
-        correct_idx0 = next((i for i in range(4) if q["answers"][i].get("is_correct")), 0)
-        st.radio("סמן נכונה", options=[1,2,3,4], index=correct_idx0, key="edit_correct_idx", horizontal=True)
-
-        st.divider()
         st.markdown("**מדיה**")
         t = q.get("type","text")
         st.selectbox("סוג", ["image","video","audio","text"], index=["image","video","audio","text"].index(t), key="edit_q_type")
         st.text_input("נתיב או URL נוכחי", value=q.get("content_url",""), key="edit_q_media_url")
-        up = st.file_uploader("החלף קובץ", type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg"], key="edit_q_upload")
+        up = st.file_uploader(
+            "החלף קובץ",
+            type=ALL_MEDIA_TYPES,
+            key="edit_q_upload"
+        )
         if up:
             saved = _save_uploaded_to_storage(up)
             st.session_state["edit_q_media_url"] = saved
@@ -592,7 +663,11 @@ def admin_add_form_ui():
     t = st.selectbox("סוג", ["image","video","audio","text"], key="add_type")
     media_url = st.session_state.get("add_media_url","")
     if t!="text":
-        up = st.file_uploader("הוסף קובץ", type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg"], key="add_upload")
+        up = st.file_uploader(
+            "הוסף קובץ",
+            type=ALL_MEDIA_TYPES,
+            key="add_upload"
+        )
         if up:
             media_url = _save_uploaded_to_storage(up)
             st.session_state["add_media_url"] = media_url
