@@ -627,23 +627,28 @@ def admin_add_form_ui():
     if "add_media_url" not in st.session_state:
         st.session_state["add_media_url"] = ""
 
-    if t != "text":
-        up = st.file_uploader("הוסף קובץ (תמונה/וידאו/אודיו)",
-                              type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
-                              key="add_upload")
-        if up:
-            saved = _save_uploaded_to_storage(up)
-            st.session_state["add_media_url"] = saved
-            flash("success", "קובץ נשמר בהצלחה")
-            st.rerun()
+if t != "text":
+    up = st.file_uploader("הוסף קובץ (תמונה/וידאו/אודיו)",
+                          type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
+                          key="add_upload")
 
-        st.text_input("או הדבק URL", key="add_media_url")
+    # מנגנון "פעם אחת"
+    if up is None:
+        st.session_state.pop("add_upload_done", None)  # איפוס כשמנקים את ה-uploader
+    elif not st.session_state.get("add_upload_done"):
+        saved = _save_uploaded_to_storage(up)
+        st.session_state["add_media_url"] = saved
+        st.session_state["add_upload_done"] = True
+        flash("success", "קובץ נשמר בהצלחה")
+        st.rerun()  # לרענון התצוגה ושדה ה-URL
 
-        signed = _signed_or_raw(st.session_state["add_media_url"], 300) if st.session_state["add_media_url"] else ""
-        if signed:
-            if t == "image": st.image(signed, use_container_width=True)
-            elif t == "video": st.video(signed)
-            elif t == "audio": st.audio(signed)
+    st.text_input("או הדבק URL", key="add_media_url")
+
+    signed = _signed_or_raw(st.session_state["add_media_url"], 300) if st.session_state["add_media_url"] else ""
+    if signed:
+        if t == "image": st.image(signed, use_container_width=True)
+        elif t == "video": st.video(signed)
+        elif t == "audio": st.audio(signed)
 
     q_text = st.text_input("טקסט השאלה", key="add_q_text")
 
