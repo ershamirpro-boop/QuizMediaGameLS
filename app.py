@@ -119,45 +119,28 @@ label,p,li,.stMarkdown{text-align:right}
   background:#23C483!important;color:#fff!important;border:0!important
 }
 
-/* ===== תשובות ככפתורים - אפשרות 1: רקע אדום כשנבחר ===== */
-.answer-grid [role="radiogroup"]{
-  display:grid;grid-template-columns:1fr 1fr;gap:10px
-}
-/* מסתיר את נקודות הרדיו */
-.answer-grid input[type="radio"]{display:none !important;}
-/* הופך label לכפתור */
-.answer-grid label{
-  border:1px solid rgba(0,0,0,.15);
-  border-radius:12px;
-  padding:12px 14px;
-  min-height:56px;
-  display:flex;align-items:center;justify-content:center;
-  font-size:18px;
-  cursor:pointer;user-select:none;
+/* ===== אזור תשובות כגריד 2x2 ===== */
+.answer-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* בסיס לכפתורי תשובות */
+.choice-btn .stButton>button{
+  width:100%;padding:14px 16px;font-size:18px;border-radius:12px;
+  border:1px solid rgba(200,200,200,.35);
+  background:rgba(255,255,255,.03);
   transition:all .12s ease-in-out;
-  background:rgba(255,255,255,.04);
+  min-height:56px;
 }
-.answer-grid label:hover{
-  box-shadow:0 0 0 2px rgba(0,0,0,.06) inset;
-}
-/* כשהאופציה נבחרה - מילוי אדום מודגש */
-.answer-grid label:has(input:checked){
-  background:#ff4b4b !important;
-  color:#fff !important;
-  border-color:#ff4b4b !important;
-  box-shadow:0 0 0 2px rgba(255,75,75,.25) inset !important;
-  font-weight:700;
-}
-/* פוקוס מקלדת */
-.answer-grid label:has(input:focus-visible){
-  outline:3px solid rgba(59,130,246,.55);
-  outline-offset:2px;
+.choice-btn .stButton>button:hover{
+  box-shadow:0 0 6px rgba(255,255,255,.15);
 }
 
-/* מדיה */
-img{max-height:52vh;object-fit:contain}
-.video-shell,.audio-shell{width:100%}
-.video-shell video,.audio-shell audio{width:100%}
+/* מצב נבחר - גם מסגרת וגם רקע וגם גופן מודגש */
+.selected-btn .stButton>button{
+  border:3px solid #ff006e !important;
+  background:rgba(255,0,110,.16) !important;
+  color:#ffffff !important;
+  font-weight:700 !important;
+}
 
 /* פס ניווט תחתון */
 .bottom-bar{
@@ -181,8 +164,13 @@ img{max-height:52vh;object-fit:contain}
 
 /* מובייל - טור אחד */
 @media (max-width:520px){
-  .answer-grid [role="radiogroup"]{grid-template-columns:1fr}
+  .answer-grid{grid-template-columns:1fr}
 }
+
+/* מדיה */
+img{max-height:52vh;object-fit:contain}
+.video-shell,.audio-shell{width:100%}
+.video-shell video,.audio-shell audio{width:100%}
 </style>
 """, unsafe_allow_html=True)
 
@@ -227,23 +215,46 @@ def _render_media(q: Dict[str, Any], key: str):
     elif t=="video": st.video(signed)
     elif t=="audio": st.audio(signed)
 
-# ========================= גריד תשובות ככפתורים =========================
-def answers_grid(question: Dict[str, Any], q_index: int, key_prefix: str):
-    opts = [a["text"] for a in question["answers"]]
-    current = st.session_state.answers_map.get(q_index, None)
+# ========================= כפתורי תשובות עם הדגשה =========================
+def choice_button(label: str, q_index: int, btn_idx: int) -> bool:
+    picked = st.session_state.answers_map.get(q_index)
+    is_selected = (picked == label)
+    anchor_id = f"choice_{q_index}_{btn_idx}"
+    wrapper_class = "choice-btn selected-btn" if is_selected else "choice-btn"
 
+    # עוגן וקלאס מסביב לכפתור
+    st.markdown(f"<div class='{wrapper_class}' id='{anchor_id}'></div>", unsafe_allow_html=True)
+    clicked = st.button(label, key=f"btn_{q_index}_{btn_idx}", use_container_width=True)
+
+    if is_selected:
+        st.markdown(f"""
+        <style>
+        /* מבטיח שהכפתור שאחרי העוגן יהיה מודגש גם אם Streamlit עוטף בעוד divים */
+        div#{anchor_id} + div button {{
+            border:3px solid #ff006e !important;
+            background:rgba(255,0,110,.16) !important;
+            color:#ffffff !important;
+            font-weight:700 !important;
+        }}
+        </style>
+        """, unsafe_allow_html=True)
+
+    return clicked
+
+def render_answer_buttons(question: Dict[str, Any], q_index: int):
     st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
-    picked = st.radio(
-        label="בחר תשובה",
-        options=opts,
-        index=opts.index(current) if current in opts else None,
-        key=f"{key_prefix}_radio_{q_index}",
-        label_visibility="collapsed",
-    )
+    col1, col2 = st.columns(2)
+    with col1:
+        for i in [0, 2]:
+            if choice_button(question["answers"][i]["text"], q_index, i):
+                st.session_state.answers_map[q_index] = question["answers"][i]["text"]
+                st.rerun()
+    with col2:
+        for i in [1, 3]:
+            if choice_button(question["answers"][i]["text"], q_index, i):
+                st.session_state.answers_map[q_index] = question["answers"][i]["text"]
+                st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
-
-    if picked is not None and picked != current:
-        st.session_state.answers_map[q_index] = picked
 
 # ========================= Header =========================
 st.title("🎯 משחק טריוויה מדיה")
@@ -294,26 +305,25 @@ if not st.session_state.get("admin_mode"):
             if q.get("category"):
                 st.caption(f"קטגוריה: {q.get('category')} | קושי: {q.get('difficulty','לא צוין')}")
 
-            answers_grid(q, idx, key_prefix="quiz")
+            # תשובות ככפתורים עם הדגשה
+            render_answer_buttons(q, idx)
 
+            # פס תחתון: אחורה + שמור בחירה והמשך + אפס משחק
             st.markdown('<div class="bottom-bar">', unsafe_allow_html=True)
-            nav_l, nav_r = st.columns(2)
-            with nav_l:
-                if st.button("הקודם ↩︎", disabled=(idx==0)):
+            c_left, c_mid, c_right = st.columns(3)
+            with c_left:
+                if st.button("↩︎ אחורה", disabled=(idx == 0)):
                     st.session_state.current_idx -= 1; st.rerun()
-            with nav_r:
-                # לפי בקשתך - אין כפתור "↪︎ הבא"
-                st.button("↪︎ הבא", disabled=True)
-
-            c1, c2 = st.columns(2)
-            if c1.button("שמור והמשך לשאלה הבאה", disabled=(idx not in st.session_state.answers_map)):
-                if idx + 1 >= len(qlist):
-                    st.session_state.phase = "review"
-                else:
-                    st.session_state.current_idx += 1
-                st.rerun()
-            if c2.button("אפס משחק"):
-                reset_game_state(); st.rerun()
+            with c_mid:
+                if st.button("שמור בחירה והמשך", disabled=(idx not in st.session_state.answers_map)):
+                    if idx + 1 >= len(qlist):
+                        st.session_state.phase = "review"
+                    else:
+                        st.session_state.current_idx += 1
+                    st.rerun()
+            with c_right:
+                if st.button("אפס משחק"):
+                    reset_game_state(); st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
     elif st.session_state.phase == "review":
@@ -327,7 +337,8 @@ if not st.session_state.get("admin_mode"):
         _render_media(q, key=f"rev{ridx}")
         st.markdown(f"**{q['question']}**")
 
-        answers_grid(q, ridx, key_prefix="review")
+        # תשובות ככפתורים עם הדגשה
+        render_answer_buttons(q, ridx)
 
         cols = st.columns(2)
         with cols[0]:
@@ -567,7 +578,6 @@ def admin_add_form_ui():
                "answers": [{"text": a_vals[i], "is_correct": (i+1)==correct_idx_1based} for i in range(4)]}
     _render_media(preview, key="add_preview")
     st.markdown(f"### {q_text if q_text else '...'}")
-    st.markdown('<div class="answer-grid">', unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
         for i in [0,2]:
