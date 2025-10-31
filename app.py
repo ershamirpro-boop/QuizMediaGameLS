@@ -416,7 +416,7 @@ if not st.session_state.get("admin_mode"):
                 st.session_state.review_idx -= 1
                 st.rerun()
         with cols[1]:
-            if st.button("הבא →", disabled=(ridx == len(qlist) - 1)):
+            if st.button("הבא ", disabled=(ridx == len(qlist) - 1)):
                 st.session_state.review_idx += 1
                 st.rerun()
 
