@@ -380,7 +380,7 @@ if not st.session_state.get("admin_mode"):
             st.markdown('<div class="bottom-bar">', unsafe_allow_html=True)
             c_left, c_mid, c_right = st.columns(3)
             with c_left:
-                if st.button("↩︎ הקודם", disabled=(idx == 0)):
+                if st.button(" הקודם", disabled=(idx == 0)):
                     st.session_state.current_idx -= 1
                     st.rerun()
             with c_mid:
@@ -412,7 +412,7 @@ if not st.session_state.get("admin_mode"):
 
         cols = st.columns(2)
         with cols[0]:
-            if st.button("← הקודם", disabled=(ridx == 0)):
+            if st.button(" הקודם", disabled=(ridx == 0)):
                 st.session_state.review_idx -= 1
                 st.rerun()
         with cols[1]:
