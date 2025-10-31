@@ -679,7 +679,7 @@ def admin_add_form_ui():
 
     if t != "text":
         up = st.file_uploader("הוסף קובץ (תמונה/וידאו/אודיו)",
-                              type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
+                              type=["jpg","jpeg","png","gif","mp4","webm","mov","m4a","mp3","wav","ogg","heic","heif"],
                               key="add_upload")
         # מנגנון "פעם אחת"
         if up is None:
