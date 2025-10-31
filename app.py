@@ -267,7 +267,14 @@ def reset_admin_state():
         st.session_state.pop(k, None)
 
 def reset_game_state():
+    # נקה מפתחות מצב כלליים
     for k in ["phase","questions","answers_map","current_idx","score","finished","review_idx"]:
+        st.session_state.pop(k, None)
+
+    # נקה מפתחות פר־שאלה שמושפעים מהאיטרציה הקודמת
+    junk_prefixes = ("ans_map_", "quiz_radio_", "review_radio_")
+    to_delete = [k for k in list(st.session_state.keys()) if k.startswith(junk_prefixes)]
+    for k in to_delete:
         st.session_state.pop(k, None)
 
 def ensure_game_loaded():
