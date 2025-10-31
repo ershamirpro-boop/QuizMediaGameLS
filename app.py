@@ -1,7 +1,7 @@
 from __future__ import annotations
-import os, json, random, uuid, pathlib, html, mimetypes, tempfile, io
+import os, json, random, uuid, pathlib, html, mimetypes, tempfile, io, time
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import streamlit as st
 
 # ========================= קבועים והגדרות =========================
@@ -13,7 +13,7 @@ LOCAL_QUESTIONS_JSON = DATA_DIR / "questions.json"
 ADMIN_CODE = os.getenv("ADMIN_CODE", "admin246")
 FIXED_N_QUESTIONS = 15
 
-# Supabase (אופציונלי) - דרך Secrets
+# Supabase - אופציונלי דרך Secrets
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "")
@@ -24,17 +24,15 @@ def _supabase_on() -> bool:
 
 # ========================= Flash notifications =========================
 def flash(kind: str, msg: str):
-    """kind: 'success'|'info'|'warning'|'error' — יוצג אחרי rerun הבא"""
+    # kind: success|info|warning|error
     st.session_state["_flash"] = {"kind": kind, "msg": msg}
 
 def show_flash():
     data = st.session_state.pop("_flash", None)
-    if not data:
-        return
-    kind = data.get("kind", "info")
-    msg = data.get("msg", "")
+    if not data: return
+    kind = data.get("kind", "info"); msg = data.get("msg", "")
     if hasattr(st, "toast"):
-        icon = {"success": "✅","info":"ℹ️","warning":"⚠️","error":"❌"}.get(kind, "ℹ️")
+        icon = {"success":"✅","info":"ℹ️","warning":"⚠️","error":"❌"}.get(kind, "ℹ️")
         st.toast(msg, icon=icon)
     else:
         {"success": st.success, "info": st.info, "warning": st.warning, "error": st.error}.get(kind, st.info)(msg)
@@ -57,14 +55,14 @@ label,p,li,.stMarkdown{text-align:right}
   background:#23C483!important;color:#fff!important;border:0!important
 }
 
-/* גריד 2x2 לרדיו כדי להיראות כמו כפתורים */
+/* גריד 2x2 לרדיו */
 .answer-wrap [role="radiogroup"]{
   display:grid;
   grid-template-columns:1fr 1fr;
   gap:10px;
 }
 
-/* כפתור בחירה עם נקודת רדיו בפנים (ימין) וטקסט במרכז */
+/* רדיו כמו כפתורים */
 .answer-wrap [role="radio"]{
   display:flex; flex-direction:row-reverse; align-items:center; gap:10px;
   width:100%; min-height:64px; padding:12px 14px; box-sizing:border-box;
@@ -83,7 +81,7 @@ label,p,li,.stMarkdown{text-align:right}
 .answer-wrap [role="radio"]:hover{ box-shadow:0 0 0 2px rgba(0,0,0,.06) inset; }
 .answer-wrap [role="radio"]:focus-visible{ outline:3px solid rgba(59,130,246,.55); outline-offset:2px; }
 
-/* פס ניווט תחתון */
+/* פס תחתון */
 .bottom-bar{
   position:sticky;bottom:0;background:rgba(255,255,255,.94);
   backdrop-filter:blur(6px);padding:10px 8px;border-top:1px solid rgba(0,0,0,.08)
@@ -92,18 +90,18 @@ label,p,li,.stMarkdown{text-align:right}
   .bottom-bar{background:rgba(17,24,39,.9);border-top:1px solid rgba(255,255,255,.08)}
 }
 
-/* תגיות הצלחה/כישלון */
+/* תגיות */
 .summary-btns .stButton button{width:100%;padding:12px 16px;font-size:16px;border-radius:10px}
 .badge-ok{background:#E8FFF3;border:1px solid #23C483;color:#0b7a56;padding:6px 10px;border-radius:10px;font-size:14px}
 .badge-err{background:#FFF0F0;border:1px solid #F44336;color:#a02121;padding:6px 10px;border-radius:10px;font-size:14px}
 
-/* CTA גדול ל"בדוק אותי" */
+/* CTA גדול */
 .primary-cta .stButton>button{
   width:100%;padding:16px 18px;font-size:20px;border-radius:12px;
   background:#ff006b !important;color:#fff !important;border:0 !important
 }
 
-/* מובייל - טור אחד לרדיו */
+/* מובייל */
 @media (max-width:520px){
   .answer-wrap [role="radiogroup"]{grid-template-columns:1fr}
 }
@@ -112,6 +110,9 @@ label,p,li,.stMarkdown{text-align:right}
 img{max-height:52vh;object-fit:contain}
 .video-shell,.audio-shell{width:100%}
 .video-shell video,.audio-shell audio{width:100%}
+
+/* לינק חלופי קטן */
+.alt-link{font-size:12px;margin-top:6px;display:block;opacity:.8}
 </style>
 """, unsafe_allow_html=True)
 
@@ -123,26 +124,50 @@ def _get_supabase():
     from supabase import create_client
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-# ========================= העלאות מאובטחות + HEIC→JPEG =========================
+# ========================= Signed URL cache קטן ומהיר =========================
+# כדי להאיץ טעינת תמונות וסרטונים, עם TTL קצר כדי לא לשבור חתימות
+@st.cache_data(ttl=120, show_spinner=False)
+def _signed_cached(sb_url: str, seconds: int = 300) -> str:
+    sb = _get_supabase(); assert sb is not None
+    _, bucket, path = sb_url.split("/", 2)
+    res = sb.storage.from_(bucket).create_signed_url(path, seconds)
+    return res.get("signedURL") or res.get("signed_url") or ""
+
 def _sburl(bucket: str, object_path: str) -> str:
     return f"sb://{bucket}/{object_path}"
 
-def _split_sburl(sb_url: str) -> tuple[str,str]:
+def _split_sburl(sb_url: str) -> Tuple[str,str]:
     _, b, p = sb_url.split("/", 2)
     return b, p
 
 def sign_url_sb(sb_url: str, expires_seconds: int = 300) -> str:
     assert sb_url.startswith("sb://")
-    sb = _get_supabase(); assert sb is not None
-    bucket, path = _split_sburl(sb_url)
-    res = sb.storage.from_(bucket).create_signed_url(path, expires_seconds)
-    return res.get("signedURL") or res.get("signed_url") or ""
+    # נשתמש בcache כדי להיות מהירים
+    return _signed_cached(sb_url, expires_seconds)
 
-def _ensure_jpeg_for_heic(upload) -> tuple[bytes, str, str]:
-    """
-    אם קובץ HEIC/HEIF - ננסה להמיר ל-JPEG (bytes, שם חדש, content_type).
-    אחרת נחזיר את המקור.
-    """
+def _signed_or_raw(url: str, seconds: int = 300) -> str:
+    if url and url.startswith("sb://") and _supabase_on():
+        return sign_url_sb(url, seconds)
+    return url
+
+# ========================= Prefetch למדיה הבאה =========================
+def _prefetch_media(url: str, mtype: str):
+    # נשתמש ב<link rel="preload"> כדי לרמוז לדפדפן לטעון מראש
+    if not url: return
+    as_attr = "image" if mtype == "image" else "video" if mtype == "video" else "audio"
+    st.markdown(f"<link rel='preload' as='{as_attr}' href='{html.escape(url)}' />", unsafe_allow_html=True)
+
+def _prefetch_next_question(qlist: List[Dict[str,Any]], idx: int):
+    nxt = idx + 1
+    if nxt >= len(qlist): return
+    qn = qlist[nxt]
+    t = qn.get("type", "text")
+    url = _signed_or_raw(qn.get("content_url",""), 300)
+    if t in {"image","video","audio"} and url:
+        _prefetch_media(url, t)
+
+# ========================= העלאות מאובטחות + HEIC→JPEG =========================
+def _ensure_jpeg_for_heic(upload) -> Tuple[bytes, str, str]:
     name = upload.name
     raw = upload.getbuffer()
     ext = pathlib.Path(name).suffix.lower()
@@ -156,7 +181,8 @@ def _ensure_jpeg_for_heic(upload) -> tuple[bytes, str, str]:
                 pillow_heif.register_heif_opener()
             except Exception:
                 pass
-            im = Image.open(io.BytesIO(raw)).convert("RGB")
+            im = Image.open(io.BytesIO(raw))
+            im = im.convert("RGB")
             out = io.BytesIO()
             im.save(out, format="JPEG", quality=92, optimize=True)
             jpeg_bytes = out.getvalue()
@@ -178,30 +204,24 @@ def _save_uploaded_file_local(upload) -> str:
 
 def _upload_bytes_to_supabase(object_path: str, file_bytes: bytes, content_type: str) -> str:
     sb = _get_supabase(); assert sb is not None
+    # חשוב: file_options מחרוזות
     file_options = {"contentType": content_type, "upsert": "true"}
     sb.storage.from_(SUPABASE_BUCKET).upload(object_path, file_bytes, file_options=file_options)
     return _sburl(SUPABASE_BUCKET, object_path)
 
 def _save_uploaded_to_storage(upload) -> str:
-    """מעלה ל-Supabase אם מוגדר, אחרת לשמירה מקומית. כולל המרת HEIC→JPEG."""
-    if not upload:
-        return ""
+    if not upload: return ""
     file_bytes, fixed_name, content_type = _ensure_jpeg_for_heic(upload)
     if _supabase_on():
         folder = datetime.utcnow().strftime("media/%Y/%m")
         ext = pathlib.Path(fixed_name).suffix.lower()
         object_path = f"{folder}/{uuid.uuid4().hex}{ext}"
         return _upload_bytes_to_supabase(object_path, file_bytes, content_type)
-    # שמירה מקומית
+    # מקומי
     class _Tmp:
         name = fixed_name
         def getbuffer(self): return file_bytes
     return _save_uploaded_file_local(_Tmp())
-
-def _signed_or_raw(url: str, seconds: int = 300) -> str:
-    if url and url.startswith("sb://") and _supabase_on():
-        return sign_url_sb(url, seconds)
-    return url
 
 # ========================= DB: קריאה/כתיבה עם cache =========================
 @st.cache_data(ttl=60, show_spinner=False)
@@ -225,13 +245,13 @@ def _read_questions_cached() -> List[Dict[str, Any]]:
     return clean
 
 def _write_questions(all_q: List[Dict[str, Any]]) -> None:
-    """כותב JSON + מנקה cache של הקריאה."""
     payload = json.dumps(all_q, ensure_ascii=False, indent=2).encode("utf-8")
     if _supabase_on():
         sb = _get_supabase(); assert sb is not None
         file_options = {"contentType": "application/json; charset=utf-8", "upsert": "true"}
         with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
-            tmp.write(payload); tmp_path = tmp.name
+            tmp.write(payload)
+            tmp_path = tmp.name
         try:
             sb.storage.from_(SUPABASE_BUCKET).upload(QUESTIONS_OBJECT_PATH, tmp_path, file_options=file_options)
         finally:
@@ -254,7 +274,7 @@ def ensure_game_loaded():
     if "questions" not in st.session_state:
         qs = _read_questions_cached()
         k = min(FIXED_N_QUESTIONS, len(qs))
-        chosen = random.sample(qs, k=k) if k>0 else []
+        chosen = random.sample(qs, k=k) if k > 0 else []
         for q in chosen:
             random.shuffle(q["answers"])
         st.session_state.questions = chosen
@@ -272,37 +292,57 @@ def _calc_score(questions: List[Dict[str, Any]], answers_map: Dict[int, str]) ->
         if picked == correct_text: score += 1
     return score
 
-# ========================= מדיה לתצוגה =========================
+# ========================= רנדר מדיה - עם וידאו מושתק =========================
 def _render_media(q: Dict[str, Any], key: str):
     t = q.get("type","text")
     url = q.get("content_url","")
     if not url: return
     signed = _signed_or_raw(url, seconds=300)
+
     if t == "image":
         st.image(signed, use_container_width=True)
     elif t == "video":
-        # נגן הווידאו + קישור עוקף (לפתיחה נפרדת בדפדפן/נגן מקומי)
-        st.video(signed)
-        st.markdown(f"<div style='margin-top:6px;font-size:13px;text-align:center'>"
-                    f"<a href='{html.escape(signed)}' target='_blank' rel='noopener'>🎬 סרטון לא עובד? לחץ כאן</a>"
-                    f"</div>", unsafe_allow_html=True)
+        # HTML5 video מושתק, שומר על פרטיות, מאפשר הפעלה ידנית
+        st.markdown(
+            f"""
+            <div class="video-shell">
+              <video src="{html.escape(signed)}" muted playsinline controls preload="metadata"></video>
+              <a class="alt-link" href="{html.escape(signed)}" target="_blank" rel="noopener">
+                סרטון לא עובד? לחץ כאן
+              </a>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
     elif t == "audio":
+        # אודיו ללא השתקה
         st.audio(signed)
 
-# ========================= תשובות כ"רדיו-כפתורים" =========================
+# ========================= רדיו יציב - בלי צורך בקליק כפול =========================
 def answers_grid(question: Dict[str, Any], q_index: int, key_prefix: str):
     opts = [a["text"] for a in question["answers"]]
-    current = st.session_state.answers_map.get(q_index, None)
+    map_key = f"ans_map_{q_index}"
+    # נייצב את המצב הראשוני פעם אחת
+    if map_key not in st.session_state:
+        st.session_state[map_key] = st.session_state.get("answers_map", {}).get(q_index)
+
+    # נגזור אינדקס אם יש ערך קיים
+    current_val = st.session_state[map_key]
+    idx = opts.index(current_val) if current_val in opts else None
+
     st.markdown('<div class="answer-wrap">', unsafe_allow_html=True)
     picked = st.radio(
         label="בחר תשובה",
         options=opts,
-        index=(opts.index(current) if current in opts else None),
+        index=idx,
         key=f"{key_prefix}_radio_{q_index}",
         label_visibility="collapsed",
     )
     st.markdown('</div>', unsafe_allow_html=True)
-    if picked is not None and picked != current:
+
+    # אם הערך השתנה נעדכן מפה וסטייט
+    if picked != st.session_state.get(map_key):
+        st.session_state[map_key] = picked
         st.session_state.answers_map[q_index] = picked
 
 # ========================= Header =========================
@@ -360,6 +400,9 @@ if not st.session_state.get("admin_mode"):
             # תשובות
             answers_grid(q, idx, key_prefix="quiz")
 
+            # Prefetch למדיה של השאלה הבאה
+            _prefetch_next_question(qlist, idx)
+
             # פס תחתון
             st.markdown('<div class="bottom-bar">', unsafe_allow_html=True)
             c_left, c_mid, c_right = st.columns(3)
@@ -390,6 +433,7 @@ if not st.session_state.get("admin_mode"):
         st.markdown(f"**{q['question']}**")
 
         answers_grid(q, ridx, key_prefix="review")
+        _prefetch_next_question(qlist, ridx)
 
         cols = st.columns(2)
         with cols[0]:
@@ -420,7 +464,7 @@ if not st.session_state.get("admin_mode"):
             st.warning("🫣 קורה לכולם, אולי ננסה שוב?")
 
         st.divider()
-        st.markdown("### פירוט המבחן (מה סימנת ומה נכון)")
+        st.markdown("### פירוט המבחן")
         for i, q in enumerate(qlist):
             picked = st.session_state.answers_map.get(i, "-")
             correct = next(a["text"] for a in q["answers"] if a.get("is_correct"))
@@ -559,32 +603,24 @@ def admin_edit_detail_ui():
         st.text_input("קטגוריה", value=q.get("category", ""), key="edit_q_cat")
         st.number_input("קושי", min_value=1, max_value=5, value=int(q.get("difficulty", 2)), key="edit_q_diff")
 
-        st.markdown("**תשובות**")
-        cols = st.columns(4)
-        for i, c in enumerate(cols):
-            with c:
-                st.text_input(f"תשובה {i+1}", value=q["answers"][i]["text"], key=f"edit_ans_{i}")
-
-        correct_idx0 = next((i for i in range(4) if q["answers"][i].get("is_correct")), 0)
-        st.radio("סמן נכונה", options=[1, 2, 3, 4], index=correct_idx0, key="edit_correct_idx", horizontal=True)
-
-        st.divider()
         st.markdown("**מדיה**")
         t = q.get("type", "text")
         st.selectbox("סוג", ["image","video","audio","text"],
                      index=["image","video","audio","text"].index(t), key="edit_q_type")
 
+        # ודא key קיים
         if "edit_q_media_url" not in st.session_state:
             st.session_state["edit_q_media_url"] = q.get("content_url","")
 
-        # ⬇️ העלאה פעם-אחת + קבלה גם של MOV
         up = st.file_uploader(
             "החלף קובץ (תמונה/וידאו/אודיו)",
-            type=["jpg","jpeg","png","gif","mp4","webm","mov","m4a","mp3","wav","ogg","heic","heif"],
+            type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
             key="edit_q_upload"
         )
+
+        # מנגנון "פעם אחת"
         if up is None:
-            st.session_state.pop("edit_upload_done", None)  # איפוס כשמנקים
+            st.session_state.pop("edit_upload_done", None)
         elif not st.session_state.get("edit_upload_done"):
             saved = _save_uploaded_to_storage(up)
             st.session_state["edit_q_media_url"] = saved
@@ -601,10 +637,17 @@ def admin_edit_detail_ui():
         if current_type == "image" and preview_url:
             st.image(preview_url, use_container_width=True)
         elif current_type == "video" and preview_url:
-            st.video(preview_url)
-            st.markdown(f"<div style='margin-top:6px;font-size:13px;text-align:center'>"
-                        f"<a href='{html.escape(preview_url)}' target='_blank' rel='noopener'>🎬 סרטון לא עובד? לחץ כאן</a>"
-                        f"</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"""
+                <div class="video-shell">
+                  <video src="{html.escape(preview_url)}" muted playsinline controls preload="metadata"></video>
+                  <a class="alt-link" href="{html.escape(preview_url)}" target="_blank" rel="noopener">
+                    סרטון לא עובד? לחץ כאן
+                  </a>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
         elif current_type == "audio" and preview_url:
             st.audio(preview_url)
 
@@ -644,11 +687,11 @@ def admin_add_form_ui():
     if t != "text":
         up = st.file_uploader(
             "הוסף קובץ (תמונה/וידאו/אודיו)",
-            type=["jpg","jpeg","png","gif","mp4","webm","mov","m4a","mp3","wav","ogg","heic","heif"],
+            type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
             key="add_upload"
         )
 
-        # העלאה פעם-אחת
+        # מנגנון "פעם אחת"
         if up is None:
             st.session_state.pop("add_upload_done", None)
         elif not st.session_state.get("add_upload_done"):
@@ -662,13 +705,22 @@ def admin_add_form_ui():
 
         signed = _signed_or_raw(st.session_state["add_media_url"], 300) if st.session_state["add_media_url"] else ""
         if signed:
-            if t == "image": st.image(signed, use_container_width=True)
+            if t == "image":
+                st.image(signed, use_container_width=True)
             elif t == "video":
-                st.video(signed)
-                st.markdown(f"<div style='margin-top:6px;font-size:13px;text-align:center'>"
-                            f"<a href='{html.escape(signed)}' target='_blank' rel='noopener'>🎬 סרטון לא עובד? לחץ כאן</a>"
-                            f"</div>", unsafe_allow_html=True)
-            elif t == "audio": st.audio(signed)
+                st.markdown(
+                    f"""
+                    <div class="video-shell">
+                      <video src="{html.escape(signed)}" muted playsinline controls preload="metadata"></video>
+                      <a class="alt-link" href="{html.escape(signed)}" target="_blank" rel="noopener">
+                        סרטון לא עובד? לחץ כאן
+                      </a>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            elif t == "audio":
+                st.audio(signed)
 
     q_text = st.text_input("טקסט השאלה", key="add_q_text")
 
@@ -708,7 +760,8 @@ def admin_add_form_ui():
                 flash("success", "תוכן נוסף בהצלחה")
                 st.rerun()
             except Exception:
-                flash("error", "שמירה נכשלה. בדוק הרשאות/חיבור ל-Supabase ונסה שוב."); st.rerun()
+                flash("error", "שמירה נכשלה. בדוק הרשאות/חיבור ל-Supabase ונסה שוב.")
+                st.rerun()
 
 # ניהול ניווט אדמין
 if st.session_state.get("admin_mode"):
