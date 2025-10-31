@@ -612,7 +612,7 @@ def admin_edit_detail_ui():
             st.session_state["edit_q_media_url"] = q.get("content_url", "")
 
         up = st.file_uploader("החלף קובץ (תמונה/וידאו/אודיו)",
-                              type=["jpg","jpeg","png","gif","mp4","webm","m4a","mp3","wav","ogg","heic","heif"],
+                              type=["jpg","jpeg","png","gif","mp4","webm","mov","m4a","mp3","wav","ogg","heic","heif"],
                               key="edit_q_upload")
 
         # מנגנון "פעם אחת" למניעת לולאת התראות
